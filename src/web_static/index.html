@@ -34,6 +34,9 @@ header.top .wrap{display:flex;align-items:center;gap:14px;height:60px;padding-bo
 .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px;font-size:16px}
 .brand .logo{width:28px;height:28px;border-radius:8px;background:var(--accent);display:grid;place-items:center}
 .brand small{font-weight:500;color:var(--muted);font-size:12px}
+.ver{font-size:11.5px;font-weight:600;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:99px;padding:1px 8px;margin-left:6px;vertical-align:2px;font-variant-numeric:tabular-nums}
+.ver:hover{color:var(--text);border-color:var(--faint)}
+.upd{font-size:11.5px;font-weight:650;text-decoration:none;border-radius:99px;padding:2px 9px;background:var(--accent-bg);color:var(--accent);white-space:nowrap}
 .spacer{flex:1}
 .pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;font-size:12px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
@@ -226,6 +229,7 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
   .ap-row .acts{grid-column:1 / -1;justify-content:flex-end}
   .wrap{padding:0 14px 40px}
   .brand small{display:none}
+  .upd{display:none}
   #mode-pill{display:none}
   #conn span:last-child{display:none}
   header.top .wrap{gap:8px}
@@ -239,7 +243,8 @@ html,body{overflow-x:hidden}
 <header class="top"><div class="wrap">
   <div class="brand">
     <div class="logo"><svg width="18" height="18" viewBox="0 0 32 32"><path d="M9 12a7 7 0 0 1 12-3l2-2v6h-6l2-2a4 4 0 0 0-7 2zM23 20a7 7 0 0 1-12 3l-2 2v-6h6l-2 2a4 4 0 0 0 7-2z" fill="white"/></svg></div>
-    <div>romm_sync <small id="romm-url"></small></div>
+    <div>romm_sync<a class="ver" id="ver" target="_blank" rel="noopener" title="Release notes"></a> <small id="romm-url"></small></div>
+    <a class="upd" id="upd" target="_blank" rel="noopener" hidden></a>
   </div>
   <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a></nav>
   <div class="spacer"></div>
@@ -304,7 +309,7 @@ html,body{overflow-x:hidden}
 
   <footer>
     romm_sync GUI fork · based on <a href="https://github.com/amn-96/romm_syncthing_sync" target="_blank" rel="noopener">romm_syncthing_sync</a> by amn-96 (MIT) ·
-    talks to <a id="romm-link" href="#" target="_blank" rel="noopener">your RomM</a>
+    talks to <a id="romm-link" href="#" target="_blank" rel="noopener">your RomM</a><span id="footer-ver"></span>
   </footer>
 </main>
 
@@ -565,6 +570,14 @@ function renderStatus(d){
   $("#mode-pill").textContent = d.config.sync_mode === "watch" ? "watch mode" : "periodic mode";
   $("#romm-url").textContent = d.config.romm_url ? "→ " + d.config.romm_url.replace(/^https?:\/\//,"") : "";
   $("#romm-link").href = d.config.romm_url || "#";
+  const v = d.version || {};
+  if (v.app) {
+    const ver = $("#ver"); ver.textContent = "v" + v.app;
+    ver.href = v.app === "dev" ? `https://github.com/${v.repo}` : `https://github.com/${v.repo}/releases/tag/v${v.app}`;
+    const upd = $("#upd"); upd.hidden = !v.update_available;
+    if (v.update_available) { upd.textContent = `Update available: v${v.latest}`; upd.href = v.latest_url || `https://github.com/${v.repo}/releases/latest`; upd.title = "Update the container to get it (Unraid: Docker tab → force update)"; }
+    document.querySelectorAll("#footer-ver").forEach(e => e.textContent = ` · romm_sync v${v.app}` + (v.romm ? ` · RomM ${v.romm}` : ""));
+  }
   const btn = $("#sync-btn"); btn.disabled = busy; btn.textContent = busy ? "⟳ Syncing…" : "⟳ Sync now";
   const conn = $("#conn");
   conn.innerHTML = `<span class="dot ${d.phase==="error"?"bad":busy?"busy":d.pending.length?"warn":"ok"}"></span><span>${d.phase==="error"?"error":busy?"working":"connected"}</span>`;

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.3.1 — version in the interface
+
+### Added
+- The app version is shown in the dashboard header (links to its release notes) and the footer, along with your RomM version, and is logged at startup.
+- An **Update available** badge appears when a newer release exists (checked against GitHub at most every 6 hours).
+- The release workflow stamps the exact release number into the image (`APP_VERSION`).
+
 ## 2.3.0 — mapping lives in the UI
 
 ### Changed

@@ -17,6 +17,11 @@ COPY src/ ./src/
 RUN rm -rf ./src/experimental
 COPY romm_sync.py VERSION platform_mapping.yaml ./
 
+# The release workflow passes the real release number (it auto-bumps the patch beyond the VERSION file).
+ARG APP_VERSION=""
+RUN if [ -n "$APP_VERSION" ]; then echo "$APP_VERSION" > VERSION; fi
+ENV APP_VERSION=${APP_VERSION}
+
 # Persistent data (sync history, pending approvals, backups). Map to appdata on Unraid.
 ENV DATA_DIR=/data \
     WEB_PORT=8080 \

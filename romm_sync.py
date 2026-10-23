@@ -26,6 +26,8 @@ def initialize_romm_sync():
     # Get the app's configuration from docker env variables. See .env.example
     app_cfg = get_config()
     install_log_sink()
+    from src.version import get_version
+    logger.info(f"romm_sync v{get_version()} — https://github.com/sireteanu/romm_syncthing_sync")
     STATE.sync_mode = app_cfg.SYNC_MODE
 
     if app_cfg.WEB_UI:
@@ -64,6 +66,7 @@ def initialize_romm_sync():
         try:
             version = romm.version()
             if version:
+                STATE.romm_version = version
                 logger.info(f"Connected to RomM {version}.")
             # First sync. Compares all save states
             logger.info("Building local and romm libraries. This may take a while for large libraries...")

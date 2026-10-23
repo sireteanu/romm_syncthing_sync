@@ -119,6 +119,8 @@ def create_app(cfg) -> FastAPI:
             "poll_interval": cfg.ROMM_POLL_INTERVAL_SECONDS,
             "dry_run": cfg.DRY_RUN,
         }
+        from .version import get_version, UPDATES, REPO
+        snap["version"] = {"app": get_version(), "repo": REPO, "romm": STATE.romm_version, **UPDATES.info()}
         return JSONResponse(snap)
 
     @app.post("/api/sync")

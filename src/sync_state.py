@@ -111,6 +111,7 @@ class AppState:
         self.next_sync_at: Optional[str] = None
         self.sync_mode: str = ""
         self.last_error: Optional[str] = None
+        self.romm_version: Optional[str] = None
 
         # Snapshots for the GUI
         self.games: Dict[str, dict] = {}    # key "platform/game" -> snapshot dict
