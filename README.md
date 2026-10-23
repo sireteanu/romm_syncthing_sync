@@ -95,7 +95,7 @@ It *does not* sort states by core, though I had some leftover different cores fo
 The implicit assumption here is that the game files (ROM, with one M) on your device are *already* the same files as the ROMs in your RomM library. Set up your RomM library before trying to run this app. RomM allows you to map your *local* directory names to *their supported platform names* ("slugs") to make library management easier. [See the docs here.](https://docs.romm.app/latest/Getting-Started/Configuration-File/?h=platform+name#custom-folder-names)
 
 ### Downloads land next to the files your devices already use
-Files pulled from RomM are written into the same `<sync folder>/<system folder>/` layout, named the way RetroArch expects (`Game (USA).srm`, `Game (USA).state1` + `.state1.png`). RomM-only games are placed in an existing system folder that maps to the game's RomM platform. If you have no folder for that system yet, create it (or add it to `platform_mapping.yaml`).
+Files pulled from RomM are written into the same `<sync folder>/<system folder>/` layout, named the way RetroArch expects (`Game (USA).srm`, `Game (USA).state1` + `.state1.png`). RomM-only games are placed in an existing system folder that maps to the game's RomM platform. If you have no folder for that system yet, create it and check it on the Platforms page.
 
 ### Still not a full RomM client
 This doesn't download ROMs or manage your library. For devices that can run a real RomM client (e.g. Grout), that's still the better choice. This tool is for the devices that can't.
@@ -248,10 +248,10 @@ python -m pytest tests                 # decision-rule unit tests
 python -m tests.mock_romm --port 8099  # fake RomM 5.4 API with demo games
 python -m tests.demo_setup /tmp/demo   # matching demo sync folders
 ```
-The app reads its folders from fixed container paths (`/syncdata/saves`, `/syncdata/states`, `/config/platform_mapping.yaml`). To run it outside Docker, create those paths (or symlinks to `/tmp/demo/...`) and start it with:
+The app reads its folders from fixed container paths (`/syncdata/saves`, `/syncdata/states`). To run it outside Docker, create those paths (or symlinks to `/tmp/demo/...`) and start it with:
 ```bash
 ROMM_URL=http://127.0.0.1:8099 ROMM_AUTH_TYPE=api ROMM_API_TOKEN=x \
-SAVE_SYNC_FOLDER=1 STATE_SYNC_FOLDER=1 PLATFORM_MAP_FILE=1 DATA_DIR=/tmp/demo/data \
+SAVE_SYNC_FOLDER=1 STATE_SYNC_FOLDER=1 DATA_DIR=/tmp/demo/data \
 SYNC_MODE=watch python romm_sync.py
 ```
 
