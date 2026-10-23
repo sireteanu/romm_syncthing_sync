@@ -105,11 +105,45 @@ class RetroGameServer:
         return platform_catalog.resolve(local_platform_name, self.PLATFORM_MAP, self.library_slugs,
                                         self.library_fs_slugs, aliases)
 
+    @staticmethod
+    def _platforms_to_fetch(romm_user: RommUser, sync_dirs, platform_map: dict):
+        """RomM platforms that have a matching folder in the sync folders -> [(platform_id, label)].
+        Returns None (= read everything) if RomM's platform list isn't available."""
+        if not sync_dirs:
+            return None
+        try:
+            platforms = romm_user.list_platforms()
+        except Exception as e:
+            logger.info(f"Couldn't list RomM platforms ({e}); reading the whole library.")
+            return None
+        slugs = {p["slug"] for p in platforms}
+        fs = {str(p.get("fs_slug", "")).lower(): p["slug"] for p in platforms if p.get("fs_slug")}
+        aliases = platform_catalog.get_catalog().get("aliases", {})
+        wanted, unresolved = set(), []
+        for folder in platform_catalog.local_platform_folders(sync_dirs):
+            slug, _ = platform_catalog.resolve(folder, platform_map, slugs, fs, aliases)
+            if slug in slugs:
+                wanted.add(slug)
+            else:
+                unresolved.append(folder)
+        if unresolved:
+            logger.info(f"Sync folders without a RomM platform (see the Platforms page): {', '.join(unresolved)}")
+        chosen = [(p["id"], p.get("custom_name") or p.get("display_name") or p.get("name") or p["slug"])
+                  for p in platforms if p["slug"] in wanted]
+        total = sum(p.get("rom_count", 0) for p in platforms if p["slug"] in wanted)
+        all_total = sum(p.get("rom_count", 0) for p in platforms)
+        logger.info(f"Reading {total:,} ROMs from {len(chosen)} RomM platform(s) that have sync folders "
+                    f"(skipping {all_total - total:,} ROMs on other platforms).")
+        return chosen
+
     @classmethod
     def build_romm_library(cls,
-                           romm_user: RommUser):
-        """Factory method to instantiate a RetroGameServerClass with romm library info."""
-        data = romm_user.get_full_library()
+                           romm_user: RommUser,
+                           sync_dirs=None):
+        """Factory method to instantiate a RetroGameServerClass with romm library info.
+        With sync_dirs, only platforms that have a folder in the sync folders are read."""
+        from time import perf_counter
+        from .sync_state import ProgressReporter
 
         # define the keys of the json response we want early
         library_columns = {
@@ -129,11 +163,17 @@ class RetroGameServer:
             'merged_screenshots': list,
         }
 
-        # Strip all fields except essential ones
-        # Make sure that the data being processed is ONLY the necessary data.
-        library = [{k: v for k, v in item.items() if k in library_columns} for item in data['items']]
+        def trim(page):
+            # Keep only the fields we use, page by page (full ROM records are large).
+            return [{k: v for k, v in item.items() if k in library_columns} for item in page]
 
         platform_map = cls._load_platform_mapping()
+        t0 = perf_counter()
+        platform_ids = cls._platforms_to_fetch(romm_user, sync_dirs, platform_map)
+        data = romm_user.get_full_library(platform_ids=platform_ids, trim=trim,
+                                          on_progress=ProgressReporter("building", "Reading RomM library"))
+        library = data['items']
+        logger.info(f"RomM library read: {len(library):,} ROMs in {perf_counter() - t0:.1f}s.")
 
         return cls(library=library, platform_map=platform_map)
 

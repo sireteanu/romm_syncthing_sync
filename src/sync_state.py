@@ -342,6 +342,32 @@ class AppState:
 STATE = AppState()
 
 
+class ProgressReporter:
+    """Logs '<what>: 1,500 / 12,345 (12%)' at most every `every` seconds (plus the final line),
+    and mirrors it to the dashboard's progress bar."""
+
+    def __init__(self, phase: str, what: str, every: float = 5.0):
+        import time
+        self._time = time.monotonic
+        self.phase, self.what, self.every = phase, what, every
+        self._last = 0.0
+
+    def __call__(self, label: str, done: int, total: Optional[int], final: bool = False):
+        pct = f" ({done * 100 // total}%)" if total else ""
+        tot = f" / {total:,}" if total else ""
+        detail = f"{self.what} — {label}: {done:,}{tot}{pct}"
+        if STATE is not None:
+            with STATE.lock:
+                STATE.phase = self.phase
+                STATE.phase_detail = detail
+                STATE.progress_total = total or 0
+                STATE.progress_current = done if total else 0
+        now = self._time()
+        if final or now - self._last >= self.every or (total and done >= total):
+            self._last = now
+            logger.info(detail)
+
+
 def install_log_sink():
     """Mirror INFO+ log lines into the GUI activity feed."""
     def sink(message):

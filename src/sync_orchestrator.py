@@ -58,17 +58,29 @@ class SyncOrchestrator:
     @staticmethod
     def build_libraries(app_cfg):
         """Build fresh local and romm libraries in one step. For iniitialization."""
-        srv = RetroGameServer.build_romm_library(app_cfg.ROMM_CREDENTIALS)
-        
         if app_cfg.SAVE_SYNC_DIR and app_cfg.STATE_SYNC_DIR:
             sync_dirs = [app_cfg.SAVE_SYNC_DIR, app_cfg.STATE_SYNC_DIR]
         else:
             sync_dirs = [app_cfg.ALL_SYNC_DIR]
-        
+
+        srv = RetroGameServer.build_romm_library(app_cfg.ROMM_CREDENTIALS, sync_dirs=sync_dirs)
+
+        STATE.set_phase("building", "Scanning sync folders")
+        t0 = tpc()
         lcl = LocalLibrary(sync_dirs)
         lcl.build_local_library()
-        LibraryScanner.match_to_romm(list(lcl.games.values()), srv)
-        
+        games = list(lcl.games.values())
+        n_saves = sum(len(g.local_save_files) for g in games)
+        n_states = sum(len(g.local_state_files) for g in games)
+        n_systems = len({g.platform for g in games})
+        logger.info(f"Sync folders scanned: {len(games):,} games, {n_saves:,} saves, {n_states:,} states "
+                    f"in {n_systems} system folder(s) ({tpc() - t0:.1f}s).")
+
+        LibraryScanner.match_to_romm(games, srv)
+        matched = sum(1 for g in games if g.is_matched)
+        logger.info(f"Matched {matched:,} of {len(games):,} games to RomM"
+                    + (f" ({len(games) - matched} not found — see 'Unmatched' in the dashboard)." if matched < len(games) else "."))
+
         return srv, lcl
 
     @staticmethod
@@ -126,7 +138,7 @@ class SyncOrchestrator:
         unmatched = [g for g in games if not g.is_matched]
         return matched, unmatched
 
-    def full_sync(self, force_sync: bool = False) -> SyncResult:
+    def full_sync(self, force_sync: bool = False, reuse_libraries: bool = False) -> SyncResult:
         """Perform a complete two-way reconcile between the local library and RomM.
         1. Rebuilds both libraries
         2. Lets the SyncEngine compare every file (push / pull / queue for approval / conflict)
@@ -141,7 +153,9 @@ class SyncOrchestrator:
                 from . import platforms as platform_catalog
                 platform_catalog.ensure_catalog(self.app_cfg.ROMM_CREDENTIALS.version())
                 # Initialize a fresh state for the romm library and local library
-                self.srv, self.lcl = self.build_libraries(self.app_cfg)
+                # (skipped right after startup, which just built them)
+                if not reuse_libraries:
+                    self.srv, self.lcl = self.build_libraries(self.app_cfg)
 
                 games = list(self.lcl.games.values())
                 matched_games, unmatched_games = self._validate_games(games)
@@ -191,7 +205,8 @@ class SyncOrchestrator:
 
                 STATE.set_phase("building", "Refreshing RomM library")
                 # Refresh the romm library so that newly added games are not missed.
-                self.srv = RetroGameServer.build_romm_library(self.app_cfg.ROMM_CREDENTIALS)
+                self.srv = RetroGameServer.build_romm_library(self.app_cfg.ROMM_CREDENTIALS,
+                                                              sync_dirs=self.lcl.sync_folders)
 
                 for p, t in zip(event_paths, event_types):
                     logger.debug(f"[WATCHDOGSYNC] --- File: {p}, Type: {t}")

@@ -26,6 +26,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
 PLATFORMS = {
+    9: ("arcade", "Arcade", (150, 150, 160)),
     1: ("snes", "Super Nintendo Entertainment System", (124, 92, 255)),
     2: ("gba", "Game Boy Advance", (90, 167, 255)),
     3: ("psx", "PlayStation", (242, 179, 61)),
@@ -47,6 +48,7 @@ class Store:
         self.assets: Dict[str, List[dict]] = {"saves": [], "states": []}
         self.blobs: Dict[str, bytes] = {}
         self.next_id = 100
+        self.page_delay = 0.0
 
     def add_rom(self, rom_id: int, platform_id: int, fs_name: str, name: str):
         slug, display, _ = PLATFORMS[platform_id]
@@ -98,9 +100,12 @@ def heartbeat():
 
 
 @app.get("/api/roms")
-def roms(limit: int = 50, offset: int = 0):
-    items = S.roms[offset:offset + limit]
-    return {"items": items, "total": len(S.roms), "limit": limit, "offset": offset}
+def roms(limit: int = 50, offset: int = 0, platform_ids: Optional[int] = None, with_total: bool = True):
+    import time
+    pool = [r for r in S.roms if platform_ids is None or r["platform_id"] == platform_ids]
+    time.sleep(S.page_delay)
+    items = pool[offset:offset + limit]
+    return {"items": items, "total": len(pool) if with_total else None, "limit": limit, "offset": offset}
 
 
 @app.get("/api/platforms")
@@ -289,7 +294,13 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8099)
     ap.add_argument("--seed", default="demo")
+    ap.add_argument("--big", type=int, default=0, help="add N filler ROMs (half on snes, half on arcade)")
+    ap.add_argument("--page-delay", type=float, default=0.0, help="seconds per /api/roms page")
     a = ap.parse_args()
     if a.seed == "demo":
         seed_demo()
+    for i in range(a.big):
+        pid = 1 if i % 2 else 9
+        S.add_rom(10000 + i, pid, f"Filler Title {i:05d} (USA).zip", f"Filler Title {i:05d}")
+    S.page_delay = a.page_delay
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning")

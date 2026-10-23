@@ -168,6 +168,11 @@ def effective_mapping_path(mounted: Optional[Path]) -> Optional[Path]:
         return ui
     if mounted is not None and mounted.is_file():
         return mounted
+    if mounted is not None and mounted.is_dir() and not getattr(effective_mapping_path, "_warned", False):
+        effective_mapping_path._warned = True
+        logger.warning(f"{mounted} is a folder, not a file. Docker creates an empty folder when the mapped "
+                       "file doesn't exist on the host. Either download platform_mapping.yaml to that host path "
+                       "(delete the folder first) or remove the mapping and use the dashboard's Platforms page.")
     return None
 
 

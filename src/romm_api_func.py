@@ -220,7 +220,7 @@ class RommUser:
                  romm_password: str = os.getenv("ROMM_PASSWORD", ""),
                  romm_base_dir: Path = Path(os.getenv("ROMM_BASE_DIR", "")),
                  romm_container_name: str = os.getenv("ROMM_CONTAINER_NAME", "rommapp"),
-                 api_limit: int = int(os.getenv("ROMM_API_LIMIT", "50")),
+                 api_limit: int = int(os.getenv("ROMM_API_LIMIT", "500")),
                  auth_type: str = os.getenv("ROMM_AUTH_TYPE", "http"),
                  romm_api_token: str = os.getenv("ROMM_API_TOKEN", "")):
 
@@ -358,60 +358,65 @@ class RommUser:
 
         return data
 
-    def get_full_library(self) -> dict:
-        """Gets the full list of ROM's in the ROMM.app database, with arg support for pagination."""
+    def _get_rom_page(self, params: dict):
+        url = f"{self.url}/api/roms"
+        try:
+            response = requests.get(url, params=params, timeout=(10, 180), **self._auth_kwargs())
+        except requests.exceptions.RequestException as e:
+            raise RommUnreachable(f"Can't reach RomM at {self.url} ({type(e).__name__}: {e}). "
+                                  "Check ROMM_URL is reachable from inside this container.") from e
+        if response.status_code in (401, 403):
+            raise RuntimeError(f"RomM rejected the credentials ({response.status_code}). "
+                               "Check ROMM_AUTH_TYPE / ROMM_API_TOKEN (needs roms + platforms read access).")
+        logger.debug(f"GET {url} - {response.status_code} ({params})")
+        if response.status_code in (400, 404, 422):
+            logger.critical(f"RomM returned {response.status_code}: {response.text[:500]}")
+            raise RuntimeError(f"ROMM API returned {response.status_code}")
+        response.raise_for_status()
+        return self._validate_library_response(response)
+
+    def _fetch_roms(self, extra: dict, label: str, trim, on_progress) -> list:
+        """Page through /api/roms. Pages are trimmed as they arrive to keep memory low."""
+        items, offset, total = [], 0, None
+        limit = self.api_limit
+        while True:
+            params = {
+                "limit": limit, "offset": offset,
+                # Ask RomM not to compute the gallery extras on every page (RomM 5.x; ignored by older versions).
+                # These are what made big libraries slow to read.
+                "with_char_index": "false", "with_filter_values": "false", "with_rom_id_index": "false",
+                **extra,
+            }
+            if offset:
+                params["with_total"] = "false"
+            data = self._get_rom_page(params)
+            if total is None and isinstance(data.get("total"), int):
+                total = data["total"]
+            page = data.get("items") or []
+            items.extend(trim(page) if trim else page)
+            if on_progress:
+                on_progress(label, len(items), total)
+            if len(page) < limit:
+                break
+            offset += limit
+        return items
+
+    def get_full_library(self, platform_ids: list | None = None, trim=None, on_progress=None) -> dict:
+        """Gets the list of ROMs in RomM, page by page.
+
+        platform_ids: only read these platforms (much faster when your sync folders only cover a few systems).
+        trim: function applied to each page (keep only the fields we use).
+        on_progress: callback(label, fetched, total) for logging / the dashboard.
+        """
+        if not platform_ids:
+            return {"items": self._fetch_roms({}, "all platforms", trim, on_progress)}
 
         all_items = []
-        offset = 0  # start offset at 0.
-        # ROMM API default return limit is 50, which is also the default here. This can be controlled with docker env variable
-        limit = self.api_limit
-
-        while True:
-            params = {"limit": limit, "offset": offset}
-
-            url = f"{self.url}/api/roms/"
-            try:
-                response = requests.get(
-                    url,
-                    params=params,
-                    timeout=(10, 60),  # connect, read
-                    **self._auth_kwargs()
-                )
-            except requests.exceptions.RequestException as e:
-                raise RommUnreachable(f"Can't reach RomM at {self.url} ({type(e).__name__}: {e}). "
-                                      "Check ROMM_URL is reachable from inside this container.") from e
-            if response.status_code in (401, 403):
-                raise RuntimeError(f"RomM rejected the credentials ({response.status_code}). "
-                                   "Check ROMM_AUTH_TYPE / ROMM_API_TOKEN (needs roms + platforms read access).")
-            logger.debug(f"GET {url} - {response.status_code} (offset: {offset}, limit: {limit})")
-
-            if response.status_code == 400:
-                logger.critical(f"Bad request (400): {response.text}")
-                raise RuntimeError("ROMM API returned 400 - Bad request")
-            elif response.status_code == 404:
-                logger.critical(f"Not found (404): {response.text}")
-                raise RuntimeError("ROMM API returned 404 - Not found")
-            elif response.status_code == 422:
-                logger.critical(f"Unprocessable entity (422): {response.text}")
-                raise RuntimeError("ROMM API returned 422 - Invalid data")
-
-            response.raise_for_status()  # Raise for any other HTTP errors
-            data = self._validate_library_response(response)
-
-            if not data.get("items"):
-                logger.debug("No more items to fetch")
-                break
-
-            items_count = len(data["items"])
-            all_items.extend(data["items"])
-            logger.debug(f"Fetched {items_count} items (total so far: {len(all_items)})")
-
-            if items_count < limit:
-                logger.debug("Reached end of records")
-                break
-
-            offset += limit
-
-        logger.debug(f"Total items retrieved: {len(all_items)}")
-
+        for pid, label in platform_ids:
+            # 4.x takes platform_id, 5.x platform_ids; send both, then verify RomM really filtered.
+            page_items = self._fetch_roms({"platform_id": pid, "platform_ids": pid}, label, trim, on_progress)
+            if any(i.get("platform_id") not in (pid, None) for i in page_items):
+                logger.warning("RomM ignored the platform filter; reading the whole library instead.")
+                return {"items": self._fetch_roms({}, "all platforms", trim, on_progress)}
+            all_items.extend(page_items)
         return {"items": all_items}

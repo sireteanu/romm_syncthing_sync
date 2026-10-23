@@ -26,6 +26,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from time import perf_counter
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -33,7 +34,7 @@ from loguru import logger
 
 from .config import get_config
 from .games_class import Game
-from .sync_state import STATE, PendingAction, data_dir, utcnow_iso
+from .sync_state import STATE, PendingAction, ProgressReporter, data_dir, utcnow_iso
 
 CONFLICT_MARKER = "(conflict "
 _VERSION_TAG = re.compile(r"\s*\[\d{4}-\d{2}-\d{2}[^\]]*\]")  # RomM 5.x slot version tag
@@ -224,7 +225,11 @@ class SyncEngine:
                            "Remove ':ro' from the volume mounts to allow RomM -> folder sync.")
 
         STATE.set_phase("fetching", "Fetching saves and states from RomM")
+        t0 = perf_counter()
         remote = self.fetch_remote()
+        n_saves = sum(len(v) for v in remote["save"].values())
+        n_states = sum(len(v) for v in remote["state"].values())
+        logger.info(f"RomM has {n_saves:,} saves and {n_states:,} states for this user ({perf_counter() - t0:.1f}s).")
 
         matched = [g for g in games if g.is_matched]
         unmatched = [g for g in games if not g.is_matched]
@@ -233,9 +238,12 @@ class SyncEngine:
             STATE.update_game(self.snapshot(g, {}, {}, error=None))
 
         STATE.set_phase("syncing", f"Comparing {len(matched)} games", total=len(matched))
+        report = ProgressReporter("syncing", "Comparing local and RomM files")
         seen_rom_ids = set()
-        for game in matched:
+        for i, game in enumerate(matched, 1):
             STATE.tick(game.name)
+            report("games", i, len(matched), final=(i == len(matched)))
+            STATE.current_game = game.name
             seen_rom_ids.add(game.romm_id)
             try:
                 self._reconcile_game(game, remote, pull_mode, force, summary)

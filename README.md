@@ -146,7 +146,7 @@ All settings are environment variables (`.env.example`, or the Unraid template).
 
 **`ROMM_USERNAME` / `ROMM_PASSWORD`** (required for http auth).
 
-**`ROMM_API_LIMIT`** (optional): page size when reading the RomM library. Default 50.
+**`ROMM_API_LIMIT`** (optional): page size when reading the RomM library. Default 500 (RomM allows up to 10,000). Only platforms that have a folder in your sync folders are read, and RomM is asked to skip the gallery extras it normally computes for every page, so even large libraries read quickly.
 
 ### Sync folders
 

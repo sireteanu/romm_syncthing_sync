@@ -530,9 +530,10 @@ function renderStatus(d){
   $("#phase-detail").textContent = d.phase_detail || "";
   const p = d.progress || {}; const pct = p.total ? Math.round(100*p.current/p.total) : 0;
   const bar = $("#bar");
-  bar.classList.toggle("indeterminate", busy && !(d.phase==="syncing" && p.total));
+  bar.classList.toggle("indeterminate", busy && !p.total);
   bar.querySelector("i").style.width = (busy ? pct : 100) + "%";
-  $("#progress-text").innerHTML = busy && p.total ? `<b>${p.current}</b> of <b>${p.total}</b> games` : (d.last_sync_finished ? `Finished ${ago(d.last_sync_finished)}` : "");
+  const unit = d.phase==="syncing" ? "games" : "ROMs";
+  $("#progress-text").innerHTML = busy && p.total ? `<b>${p.current.toLocaleString()}</b> of <b>${p.total.toLocaleString()}</b> ${unit} (${pct}%)` : (d.last_sync_finished ? `Finished ${ago(d.last_sync_finished)}` : "");
   $("#current-game").textContent = busy && d.current_game ? d.current_game : "";
   const r = d.last_sync_result || {};
   const chips = [];

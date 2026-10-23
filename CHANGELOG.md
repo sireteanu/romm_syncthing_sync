@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.2.0 — faster library reads, progress logging
+
+### Changed
+- Reading the RomM library is much faster:
+  - only platforms that have a folder in your sync folders are read
+  - RomM is asked not to build its gallery extras (letter index, filter values, id index) on every page
+  - the default page size is now 500
+  - pages are trimmed to the fields the sync uses as they arrive
+- The library is read once at startup instead of twice.
+
+### Added
+- Progress in the log and on the dashboard's progress bar:
+  - "Reading RomM library — <platform>: 1,500 / 12,345 (12%)"
+  - the sync folder scan summary
+  - "Matched X of Y games"
+  - saves/states fetched from RomM
+  - "Comparing … games: x / y"
+- Platform folders with no RomM platform are listed at startup.
+- A clear warning when the mounted `platform_mapping.yaml` is a folder (Docker creates one when the host file is missing).
+
 ## 2.1.1 — startup fixes
 
 ### Fixed

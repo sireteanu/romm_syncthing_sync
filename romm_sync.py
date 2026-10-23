@@ -65,7 +65,7 @@ def initialize_romm_sync():
     else:
         logger.info("Performing initial sync.")
         force_sync: bool = app_cfg.FULL_INITIAL_SYNC == "force"
-        orchestrator.full_sync(force_sync=force_sync)
+        orchestrator.full_sync(force_sync=force_sync, reuse_libraries=True)
 
     return app_cfg, orchestrator.srv, orchestrator.lcl
 
