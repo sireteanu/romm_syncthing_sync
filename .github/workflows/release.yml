@@ -1,31 +1,93 @@
-name: Auto Tag Release
+name: Release
+
+# Every push to the default branch (main or public) becomes a new release:
+#   1. run the tests
+#   2. pick the version: VERSION file if that tag doesn't exist yet, otherwise bump the patch of the latest tag
+#   3. create the git tag + GitHub release (auto-generated notes)
+#   4. build and push the Docker image to ghcr.io/<owner>/<repo>:{version, major.minor, latest}
+# Put "[skip release]" in a commit message to push without releasing.
 
 on:
   push:
-    paths:
-      - 'VERSION'
-    branches:
-      - main
-      - public
+    branches: [main, public]   # this fork's default branch is "public" (inherited from upstream)
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  tag-release:
+  release:
+    if: ${{ !contains(github.event.head_commit.message, '[skip release]') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Read VERSION file
-        id: version
-        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
 
-      - name: Create tag and release
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      - name: Test
         run: |
+          pip install -r requirements.txt
+          python -m pytest -q tests
+
+      - name: Work out version
+        id: version
+        run: |
+          base=$(tr -d '[:space:]' < VERSION)
+          if ! git rev-parse -q --verify "refs/tags/v${base}" >/dev/null; then
+            version="$base"
+          else
+            mm="${base%.*}"
+            latest=$(git tag -l "v${mm}.*" | sed 's/^v//' | sort -V | tail -1)
+            patch="${latest##*.}"
+            version="${mm}.$((patch + 1))"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${version}"
+
+      - name: Tag and create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="v${{ steps.version.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
-          gh release create "v${{ steps.version.outputs.version }}" --generate-notes --title "Release v${{ steps.version.outputs.version }}"
+          git tag -a "$v" -m "Release $v"
+          git push origin "$v"
+          gh release create "$v" --generate-notes --title "$v" --verify-tag
+
+      - name: Lowercase image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ steps.version.outputs.version }}
+            ${{ steps.image.outputs.name }}:${{ steps.version.outputs.minor }}
+            ${{ steps.image.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}

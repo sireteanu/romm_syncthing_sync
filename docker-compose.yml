@@ -1,15 +1,19 @@
-
 ---
 services:
   romm-sync:
-    image: ghcr.io/amn-96/romm_syncthing_sync:latest
+    image: ghcr.io/sireteanu/romm_syncthing_sync:latest
     container_name: romm-sync
     restart: unless-stopped
     env_file: .env.example
+    ports:
+      - "${WEB_HOST_PORT:-8080}:8080"   # web dashboard -> http://<server>:8080
     volumes:
-    # do NOT change these. Update the variables in .env. 
+    # do NOT change the container side of these. Update the variables in .env.
     # The /syncdata/... bind mounts are hardcoded in the container.
-      # - ${ALL_SYNC_FOLDER}:/syncdata:ro  # Uncomment if saves and states in the same folder.
-      - ${SAVE_SYNC_FOLDER}:/syncdata/saves:ro
-      - ${STATE_SYNC_FOLDER}:/syncdata/states:ro
+    # Sync folders are mounted read-write so RomM -> folder sync can work.
+    # Add ":ro" to the end of them if you only ever want folder -> RomM (and set PULL_MODE=off).
+      # - ${ALL_SYNC_FOLDER}:/syncdata  # Uncomment if saves and states are in the same folder.
+      - ${SAVE_SYNC_FOLDER}:/syncdata/saves
+      - ${STATE_SYNC_FOLDER}:/syncdata/states
       - ${PLATFORM_MAP_FILE}:/config/platform_mapping.yaml  # do not change the target bind mount or the filename!!
+      - ${DATA_FOLDER:-./data}:/data   # sync history, pending approvals and backups

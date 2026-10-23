@@ -241,3 +241,15 @@ I used AI assistance in the following ways:
 - help generate the platform mapping.
 
 The architecture is mine (for better or worse).
+---
+
+## Fork additions (web GUI & two-way sync)
+
+*This section was added by the GUI fork; everything above describes the original design by amn-96.*
+
+- `src/sync_engine.py`: replaces the push step (`_fetch_romm_data` + `_push_local_to_romm`) in `full_sync()` and `watchdog_sync()` with a two-way reconcile. See [TWO_WAY_SYNC.md](TWO_WAY_SYNC.md).
+- `src/sync_state.py`: thread-safe shared state (progress, per-game snapshots, activity, pending approvals) plus the persisted sync baselines in `/data/romm_sync_state.json`.
+- `src/web.py` + `src/web_static/index.html`: FastAPI dashboard on `WEB_PORT`, started in a background thread by `initialize_romm_sync()`.
+- `RommPoller` (in `sync_orchestrator.py`): in watch mode, periodically runs `full_sync()` so RomM-side changes are noticed, and serves the dashboard's **Sync now** button.
+- `FileChangeHandler` now uses `dest_path` for rename events. Syncthing writes to a temp file and renames it into place, and the temp name was filtered out as metadata.
+- Events that arrive while a watchdog sync is running are rescheduled when it finishes.

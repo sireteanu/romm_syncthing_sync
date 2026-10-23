@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>romm-sync</Name>
+  <Repository>ghcr.io/sireteanu/romm_syncthing_sync:latest</Repository>
+  <Registry>https://github.com/sireteanu/romm_syncthing_sync/pkgs/container/romm_syncthing_sync</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/sireteanu/romm_syncthing_sync/issues</Support>
+  <Project>https://github.com/sireteanu/romm_syncthing_sync</Project>
+  <Overview>Keeps emulator saves and save states in a Syncthing folder in sync with RomM, both ways. Web dashboard shows sync progress per system and game (with RomM covers and state screenshots), asks before uploading new files or pulling from RomM, and lets you resolve conflicts side by side. Fork of romm_syncthing_sync by amn-96 (MIT).</Overview>
+  <Category>Tools: Backup: MediaApp:Other</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/sireteanu/romm_syncthing_sync/HEAD/unraid/romm-sync.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/sireteanu/romm_syncthing_sync/HEAD/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <Requires>A running RomM instance (4.5+, 5.x recommended) and a folder of saves/states, e.g. synced by Syncthing.</Requires>
+  <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Dashboard port" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Saves folder" Target="/syncdata/saves" Default="/mnt/user/syncthing/saves" Mode="rw" Description="Saves (.srm, .sav…), one subfolder per system. Use 'ro' only if PULL_MODE=off." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/syncthing/saves</Config>
+  <Config Name="States folder" Target="/syncdata/states" Default="/mnt/user/syncthing/states" Mode="rw" Description="Save states (.state*, .state*.png), one subfolder per system." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/syncthing/states</Config>
+  <Config Name="App data" Target="/data" Default="/mnt/user/appdata/romm-sync" Mode="rw" Description="Sync history, pending approvals and backups of overwritten files." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/romm-sync</Config>
+  <Config Name="Platform mapping file" Target="/config/platform_mapping.yaml" Default="/mnt/user/appdata/romm-sync/platform_mapping.yaml" Mode="ro" Description="Optional. Maps your folder names (snes, md…) to RomM platform slugs. Download platform_mapping.yaml from the repo." Type="Path" Display="advanced" Required="false" Mask="false">/mnt/user/appdata/romm-sync/platform_mapping.yaml</Config>
+  <Config Name="RomM URL" Target="ROMM_URL" Default="http://192.168.1.10:8080" Mode="" Description="Address of your RomM instance" Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="RomM auth type" Target="ROMM_AUTH_TYPE" Default="api|http" Mode="" Description="api = Client API token (recommended), http = username/password" Type="Variable" Display="always" Required="true" Mask="false">api</Config>
+  <Config Name="RomM API token" Target="ROMM_API_TOKEN" Default="" Mode="" Description="RomM → profile → Client API Tokens. Needs assets read/write and roms/platforms read." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="RomM username" Target="ROMM_USERNAME" Default="" Mode="" Description="Only for http auth" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="RomM password" Target="ROMM_PASSWORD" Default="" Mode="" Description="Only for http auth" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Sync mode" Target="SYNC_MODE" Default="watch|periodic" Mode="" Description="watch = react to file changes (and poll RomM), periodic = full sync every SYNC_INTERVAL_SECONDS" Type="Variable" Display="always" Required="true" Mask="false">watch</Config>
+  <Config Name="New local files → RomM" Target="PUSH_NEW_MODE" Default="confirm|auto" Mode="" Description="confirm = approve in the web UI first, auto = upload right away" Type="Variable" Display="always" Required="false" Mask="false">confirm</Config>
+  <Config Name="RomM → folder sync" Target="PULL_MODE" Default="confirm|auto|off" Mode="" Description="Download saves/states that are new or newer on RomM. confirm = approve in the web UI first" Type="Variable" Display="always" Required="false" Mask="false">confirm</Config>
+  <Config Name="RomM poll interval (s)" Target="ROMM_POLL_INTERVAL_SECONDS" Default="600" Mode="" Description="Watch mode: how often to check RomM for changes made elsewhere. 0 = only on Sync now" Type="Variable" Display="advanced" Required="false" Mask="false">600</Config>
+  <Config Name="Watch delay (s)" Target="WATCHDOG_DELAY_SECONDS" Default="30" Mode="" Description="Watch mode: wait for this long without file activity before syncing" Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="Periodic interval (s)" Target="SYNC_INTERVAL_SECONDS" Default="1800" Mode="" Description="Periodic mode: seconds between full syncs" Type="Variable" Display="advanced" Required="false" Mask="false">1800</Config>
+  <Config Name="Full initial sync" Target="FULL_INITIAL_SYNC" Default="true|false|force" Mode="" Description="Run a full sync when the container starts" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Force push" Target="FORCE_PUSH_SYNC" Default="false|true" Mode="" Description="Always overwrite RomM with local files, even on conflicts. Dangerous." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Backup retention (days)" Target="BACKUP_RETENTION_DAYS" Default="30" Mode="" Description="Backups of overwritten files are kept this long. 0 = forever" Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="Dashboard username" Target="WEB_USERNAME" Default="" Mode="" Description="Optional basic auth for the web UI" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Dashboard password" Target="WEB_PASSWORD" Default="" Mode="" Description="Optional basic auth for the web UI" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Owner of files written to the sync folders" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group of files written to the sync folders" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="Log level" Target="LOG_LEVEL" Default="INFO|DEBUG|WARNING|ERROR" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+  <Config Name="Timezone" Target="TZ" Default="America/Toronto" Mode="" Description="Used for log timestamps" Type="Variable" Display="advanced" Required="false" Mask="false">America/Toronto</Config>
+  <Config Name="SAVE_SYNC_FOLDER" Target="SAVE_SYNC_FOLDER" Default="/syncdata/saves" Mode="" Description="Internal: enables the saves mount. Leave as is." Type="Variable" Display="advanced-hide" Required="false" Mask="false">/syncdata/saves</Config>
+  <Config Name="STATE_SYNC_FOLDER" Target="STATE_SYNC_FOLDER" Default="/syncdata/states" Mode="" Description="Internal: enables the states mount. Leave as is." Type="Variable" Display="advanced-hide" Required="false" Mask="false">/syncdata/states</Config>
+  <Config Name="PLATFORM_MAP_FILE" Target="PLATFORM_MAP_FILE" Default="/config/platform_mapping.yaml" Mode="" Description="Internal: enables the platform map. Leave as is." Type="Variable" Display="advanced-hide" Required="false" Mask="false">/config/platform_mapping.yaml</Config>
+</Container>
