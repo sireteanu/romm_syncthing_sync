@@ -298,6 +298,20 @@ class RommUser:
         """Authenticated GET of any RomM asset (covers, screenshots, platform icons) for the GUI image proxy."""
         return requests.get(self.absolute(path_or_url), timeout=timeout, **self._auth_kwargs())
 
+    def version(self) -> str | None:
+        """RomM server version from the heartbeat, e.g. '5.4.0'."""
+        try:
+            hb = self.heartbeat()
+            return (hb.get("SYSTEM") or {}).get("VERSION") or hb.get("VERSION")
+        except Exception:
+            return None
+
+    def list_platforms(self) -> List[Dict]:
+        """Platforms in this RomM library (slug, fs_slug, name, rom_count...)."""
+        response = requests.get(f"{self.url}/api/platforms", timeout=30, **self._auth_kwargs())
+        response.raise_for_status()
+        return response.json()
+
     def heartbeat(self) -> Dict:
         response = requests.get(f"{self.url}/api/heartbeat", timeout=10)
         response.raise_for_status()

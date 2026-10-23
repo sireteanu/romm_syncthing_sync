@@ -30,6 +30,10 @@ def initialize_romm_sync():
         from src.web import start_web_server
         start_web_server(app_cfg)
 
+    # RomM's platform list + folder aliases (from GitHub, cached in /data) for automatic platform matching
+    from src import platforms as platform_catalog
+    platform_catalog.ensure_catalog(app_cfg.ROMM_CREDENTIALS.version())
+
     # First sync. Compares all save states
     logger.info("Building local and romm libraries. This may take a while for large libraries...")
     STATE.set_phase("building", "Reading RomM library and sync folders")

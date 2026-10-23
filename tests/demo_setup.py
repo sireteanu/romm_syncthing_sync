@@ -42,6 +42,9 @@ def main(root: Path):
         (sv / "n64/Orbit Golf (USA).srm", b"orbit-save", old),
         (sv / "md/Velocity Fox (USA).srm", b"velocity-save", old),
         (sv / "md/Glyph Hunter (USA).srm", b"glyph-save", old),
+        # folder-name variants for the Platforms page
+        (sv / "megadrive/Comet Courier (USA).srm", b"comet-save", old),   # RomM built-in alias -> genesis
+        (sv / "GameBoy Color/Prism Quest (USA).srm", b"prism-save", old),     # not mapped
     ]
     for p, data, when in files:
         write(p, data, when)

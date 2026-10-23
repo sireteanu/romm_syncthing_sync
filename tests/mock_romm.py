@@ -103,6 +103,17 @@ def roms(limit: int = 50, offset: int = 0):
     return {"items": items, "total": len(S.roms), "limit": limit, "offset": offset}
 
 
+@app.get("/api/platforms")
+def platforms():
+    out = []
+    for pid, (slug, display, _) in PLATFORMS.items():
+        n = sum(1 for r in S.roms if r["platform_id"] == pid)
+        if n:
+            out.append({"id": pid, "slug": slug, "fs_slug": slug, "name": display, "display_name": display,
+                        "custom_name": None, "rom_count": n})
+    return out
+
+
 def _kind(kind: str) -> str:
     if kind not in ("saves", "states"):
         raise HTTPException(404)

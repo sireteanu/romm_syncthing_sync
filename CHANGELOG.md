@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.0 — Platforms page
+
+### Added
+- **Platforms** page in the dashboard: every sync-folder system folder, the RomM platform it resolves to and how, with a searchable picker to map or override. Saves to `/data/platform_mapping.yaml` and re-syncs.
+- RomM's platform list (slugs + display names) and built-in folder aliases are downloaded from GitHub (`rommapp/romm` at your server's version tag, `rommapp/docs`), cached in `/data/romm_platforms.json`, and refreshed weekly or on demand.
+- Automatic platform matching now also uses your RomM library's folder names and RomM's folder aliases (Batocera / RetroBat / ES-DE names), so many folders need no mapping.
+
+### Changed
+- A mounted `platform_mapping.yaml` is optional. Once you save on the Platforms page, the UI-managed copy in `/data` is used instead (the mounted file is never modified).
+
 ## 2.0.0 — GUI & two-way sync fork
 
 Fork of [romm_syncthing_sync](https://github.com/amn-96/romm_syncthing_sync) 1.4.1 by amn-96.

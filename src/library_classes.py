@@ -11,12 +11,17 @@ import yaml
 from .games_class import Game
 from .romm_api_func import RommUser
 from .config import METADATA_FILE_FILTERS, get_config
+from . import platforms as platform_catalog
 
 
 class RetroGameServer:
     def __init__(self, library, platform_map):
         self.library: List[dict] = library
         self.PLATFORM_MAP: dict = platform_map
+        # Used for automatic platform resolution (see src/platforms.py)
+        self.library_slugs = {g['platform_slug'] for g in library}
+        self.library_fs_slugs = {str(g['platform_fs_slug']).lower(): g['platform_slug']
+                                 for g in library if g.get('platform_fs_slug')}
 
     @staticmethod
     def _load_platform_mapping() -> dict:
@@ -29,11 +34,17 @@ class RetroGameServer:
 
         Falls back to empty dictionary on errors, which means exact platform slug matching only.
         """
+        platform_map = {}  # the `finally` below returns this
         try:
-            platform_map_path = get_config().PLATFORM_MAP_PATH
+            # The web UI's mapping (DATA_DIR/platform_mapping.yaml) wins once it exists.
+            platform_map_path = platform_catalog.effective_mapping_path(get_config().PLATFORM_MAP_PATH)
             logger.debug(f"Attempting to load {str(platform_map_path)}")
             
             data = None
+
+            if platform_map_path is None:
+                logger.debug("No platform mapping file; using automatic platform matching only.")
+                return {}
 
             if platform_map_path is not None:
                 with open(platform_map_path, 'r') as f:
@@ -81,20 +92,19 @@ class RetroGameServer:
     def get_romm_platform(self, local_platform_name: str) -> str | None:
         """Get the ROMM platform slug for a local platform folder name.
 
-        Args:
-            local_platform_name: The local folder name (e.g., "gba", "snes")
-
-        Returns:
-            The ROMM platform slug if found, None otherwise.
-            Match is case-insensitive.
+        Order: platform_mapping.yaml -> exact RomM slug -> folder name used in your RomM library
+        -> RomM's built-in folder aliases (fetched from rommapp/romm on GitHub). Case-insensitive.
+        Returns None if nothing matches.
         """
-        local_platform_lower = local_platform_name.lower()
-        for romm_slug, local_names in self.PLATFORM_MAP.items():
-            if any(name.lower() == local_platform_lower for name in local_names):
-                return romm_slug
-        
-        return None
-    
+        slug, how = self.resolve_platform(local_platform_name)
+        return slug
+
+    def resolve_platform(self, local_platform_name: str):
+        """-> (slug or None, how) where how is mapping | exact | romm-folder | romm-alias | none."""
+        aliases = platform_catalog.get_catalog().get("aliases", {})
+        return platform_catalog.resolve(local_platform_name, self.PLATFORM_MAP, self.library_slugs,
+                                        self.library_fs_slugs, aliases)
+
     @classmethod
     def build_romm_library(cls,
                            romm_user: RommUser):

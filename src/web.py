@@ -17,7 +17,7 @@ import secrets
 import threading
 from collections import OrderedDict
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -38,6 +38,10 @@ class Decision(BaseModel):
 class BulkDecision(BaseModel):
     ids: List[str]
     decision: str
+
+
+class MappingUpdate(BaseModel):
+    choices: Dict[str, Optional[str]]  # folder -> RomM slug, or None to remove the mapping
 
 
 class _ImageCache:
@@ -167,6 +171,105 @@ def create_app(cfg) -> FastAPI:
 
         threading.Thread(target=run, name="bulk-actions", daemon=True).start()
         return {"ok": True, "queued": len(body.ids)}
+
+    # region platforms
+    from . import platforms as pf
+    plat_cache = {"t": 0.0, "data": None}
+
+    def _library_platforms():
+        import time
+        if plat_cache["data"] is None or time.time() - plat_cache["t"] > 60:
+            try:
+                plat_cache["data"] = romm.list_platforms()
+            except Exception as e:
+                logger.warning(f"Could not list RomM platforms: {e}")
+                plat_cache["data"] = plat_cache["data"] or []
+            plat_cache["t"] = time.time()
+        return plat_cache["data"]
+
+    def _sync_dirs():
+        return [d for d in (cfg.SAVE_SYNC_DIR, cfg.STATE_SYNC_DIR, cfg.ALL_SYNC_DIR) if d is not None]
+
+    def _platforms_payload():
+        catalog = pf.get_catalog()
+        lib = _library_platforms()
+        lib_by_slug = {p["slug"]: p for p in lib}
+        lib_slugs = set(lib_by_slug)
+        lib_fs = {str(p.get("fs_slug", "")).lower(): p["slug"] for p in lib if p.get("fs_slug")}
+        path = pf.effective_mapping_path(cfg.PLATFORM_MAP_PATH)
+        try:
+            mapping = pf.load_mapping(path)
+            mapping_error = None
+        except Exception as e:
+            mapping, mapping_error = {}, str(e)
+
+        names = dict(catalog.get("platforms", {}))
+        for p in lib:  # your RomM's names (incl. custom names) win
+            names[p["slug"]] = p.get("custom_name") or p.get("display_name") or p.get("name") or names.get(p["slug"], p["slug"])
+
+        with STATE.lock:
+            games = list(STATE.games.values())
+        folders = []
+        for folder in pf.local_platform_folders(_sync_dirs()):
+            slug, how = pf.resolve(folder, mapping, lib_slugs, lib_fs, catalog.get("aliases", {}))
+            fg = [g for g in games if g["platform"].lower() == folder.lower()]
+            folders.append({
+                "folder": folder, "slug": slug, "how": how,
+                "name": names.get(slug) if slug else None,
+                "in_library": slug in lib_slugs if slug else False,
+                "rom_count": lib_by_slug.get(slug, {}).get("rom_count") if slug else None,
+                "known_slug": bool(slug) and (slug in names),
+                "games": len(fg), "unmatched": sum(1 for g in fg if not g.get("matched")),
+            })
+        platforms = [{"slug": slug, "name": name, "in_library": slug in lib_slugs,
+                      "rom_count": lib_by_slug.get(slug, {}).get("rom_count", 0)}
+                     for slug, name in names.items()]
+        platforms.sort(key=lambda p: (not p["in_library"], p["name"].lower()))
+        return {
+            "folders": folders,
+            "platforms": platforms,
+            "catalog": {"source": catalog.get("source"), "fetched_at": catalog.get("fetched_at"),
+                        "count": len(catalog.get("platforms", {})), "aliases": len(catalog.get("aliases", {}))},
+            "mapping_file": str(path) if path else None,
+            "ui_mapping_file": str(pf.ui_mapping_file()),
+            "using_ui_file": path == pf.ui_mapping_file(),
+            "mounted_file": str(cfg.PLATFORM_MAP_PATH) if cfg.PLATFORM_MAP_PATH else None,
+            "mapping_error": mapping_error,
+        }
+
+    @app.get("/api/platforms")
+    def platforms_get():
+        return _platforms_payload()
+
+    @app.post("/api/platforms/refresh")
+    def platforms_refresh():
+        try:
+            pf.fetch_catalog(romm.version())
+        except Exception as e:
+            raise HTTPException(502, f"Could not download the platform list from GitHub: {e}")
+        plat_cache["data"] = None
+        return _platforms_payload()
+
+    @app.put("/api/platforms/mapping")
+    def platforms_save(body: MappingUpdate):
+        known = set(pf.get_catalog().get("platforms", {})) | {p["slug"] for p in _library_platforms()}
+        folders = {f.lower() for f in pf.local_platform_folders(_sync_dirs())}
+        for folder, slug in body.choices.items():
+            if folder.lower() not in folders:
+                raise HTTPException(400, f"Unknown folder: {folder}")
+            if slug is not None and (not isinstance(slug, str) or (known and slug not in known)):
+                raise HTTPException(400, f"Unknown RomM platform: {slug}")
+        current_path = pf.effective_mapping_path(cfg.PLATFORM_MAP_PATH)
+        try:
+            current = pf.load_mapping(current_path)
+        except Exception:
+            current = {}
+        path = pf.save_mapping(pf.apply_folder_choices(current, body.choices))
+        STATE.add_activity("INFO", f"Platform mapping saved ({len(body.choices)} folder(s) changed) → {path}")
+        if STATE.request_sync_callback:
+            STATE.request_sync_callback()
+        return _platforms_payload()
+    # endregion
 
     # region images
     def _img(content: bytes, ctype: str) -> Response:

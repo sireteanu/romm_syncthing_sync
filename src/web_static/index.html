@@ -180,6 +180,43 @@ details.activity summary::-webkit-details-marker{display:none}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;transition:all .25s;z-index:60;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
+/* nav + platforms view */
+.nav{display:flex;gap:2px;margin-left:18px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
+.nav a{padding:5px 12px;border-radius:7px;color:var(--muted);text-decoration:none;font-weight:600;font-size:13px;display:flex;gap:6px;align-items:center}
+.nav a.on{background:var(--surface-2);color:var(--text)}
+.nav a .n{font-size:11px;background:var(--bad-bg);color:var(--bad);border-radius:99px;padding:0 6px}
+.pf-head{padding:18px 20px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.pf-head h3{margin:0 0 4px;font-size:18px}
+.pf-head p{margin:0;color:var(--muted);max-width:720px}
+.pf-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.pf-table{width:100%;border-collapse:collapse}
+.pf-table th{font-size:12px;color:var(--muted);text-align:left;font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+.pf-table td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+.pf-table tr:last-child td{border-bottom:0}
+.pf-table tr.dirty td{background:var(--accent-bg)}
+.pf-folder{font-family:var(--mono);font-size:13px;font-weight:600}
+.pf-target .nm{font-weight:600}
+.pf-target .sl{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.how{font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;white-space:nowrap;text-transform:uppercase;letter-spacing:.03em}
+.how-mapping{background:var(--accent-bg);color:var(--accent)} .how-exact,.how-romm-folder{background:var(--ok-bg);color:var(--ok)}
+.how-romm-alias{background:var(--info-bg);color:var(--info)} .how-none{background:var(--bad-bg);color:var(--bad)}
+.pf-pick{display:flex;gap:6px;align-items:center;min-width:260px}
+.pf-pick input{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px}
+.pf-pick input:focus{outline:2px solid var(--accent);outline-offset:-1px}
+.pf-pick input.bad{border-color:var(--bad)}
+.savebar{position:sticky;bottom:14px;margin-top:14px;display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:12px;background:var(--surface);border:1px solid var(--accent);box-shadow:var(--shadow)}
+.legend-row{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);padding:12px 20px;border-top:1px solid var(--line)}
+@media (max-width:860px){
+  header.top .wrap{flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px;row-gap:10px}
+  .nav{order:10;margin-left:0;width:100%}
+  .nav a{flex:1;justify-content:center}
+  .pf-table thead{display:none}
+  .pf-table tr{display:grid;grid-template-columns:1fr auto;gap:6px 10px;padding:12px;border-bottom:1px solid var(--line)}
+  .pf-table td{border:0;padding:0}
+  .pf-table td.pf-c-pick{grid-column:1/-1}
+  .pf-table td.pf-c-games{display:none}
+  .pf-pick{min-width:0}
+}
 @media (max-width:860px){
   .status{grid-template-columns:1fr}
   .status .main{border-right:0;border-bottom:1px solid var(--line)}
@@ -203,6 +240,7 @@ html,body{overflow-x:hidden}
     <div class="logo"><svg width="18" height="18" viewBox="0 0 32 32"><path d="M9 12a7 7 0 0 1 12-3l2-2v6h-6l2-2a4 4 0 0 0-7 2zM23 20a7 7 0 0 1-12 3l-2 2v-6h6l-2 2a4 4 0 0 0 7-2z" fill="white"/></svg></div>
     <div>romm_sync <small id="romm-url"></small></div>
   </div>
+  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a></nav>
   <div class="spacer"></div>
   <span class="pill" id="conn"><span class="dot"></span><span>connecting…</span></span>
   <span class="pill" id="mode-pill" title="Sync mode"></span>
@@ -210,7 +248,7 @@ html,body{overflow-x:hidden}
   <button class="btn primary" id="sync-btn">⟳ Sync now</button>
 </div></header>
 
-<main class="wrap">
+<main class="wrap" id="view-dash">
   <section>
     <div class="card status">
       <div class="main">
@@ -267,6 +305,38 @@ html,body{overflow-x:hidden}
     romm_sync GUI fork · based on <a href="https://github.com/amn-96/romm_syncthing_sync" target="_blank" rel="noopener">romm_syncthing_sync</a> by amn-96 (MIT) ·
     talks to <a id="romm-link" href="#" target="_blank" rel="noopener">your RomM</a>
   </footer>
+</main>
+
+<main class="wrap" id="view-plat" hidden>
+  <section>
+    <div class="card">
+      <div class="pf-head">
+        <div style="flex:1;min-width:260px">
+          <h3>Platform mapping</h3>
+          <p>Every system folder in your sync folders has to point at a RomM platform so its saves can be matched to games.
+             Most folders match automatically. Pick a platform for the ones marked <b>Not mapped</b>, or to override a match.</p>
+          <div class="pf-meta" id="pf-meta"></div>
+        </div>
+        <button class="btn" id="pf-refresh">⟳ Update platform list from RomM GitHub</button>
+      </div>
+      <div id="pf-notices" style="padding:0 20px"></div>
+      <div style="overflow-x:auto"><table class="pf-table">
+        <thead><tr><th>Folder</th><th class="pf-c-games">Games</th><th>Matches RomM platform</th><th>How</th><th>Change</th></tr></thead>
+        <tbody id="pf-rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+      </table></div>
+      <div class="legend-row">
+        <span><span class="how how-mapping">Your mapping</span> set here or in platform_mapping.yaml</span>
+        <span><span class="how how-exact">Exact</span> folder name is the RomM slug</span>
+        <span><span class="how how-romm-folder">RomM folder</span> same folder name as in your RomM</span>
+        <span><span class="how how-romm-alias">RomM alias</span> RomM's built-in alias (Batocera / ES-DE names)</span>
+      </div>
+    </div>
+    <div class="savebar" id="pf-savebar" hidden>
+      <b id="pf-dirty-count"></b><span style="color:var(--muted)">Saving re-runs a sync so games get re-matched.</span><span class="spacer" style="flex:1"></span>
+      <button class="btn" id="pf-discard">Discard</button><button class="btn primary" id="pf-save">Save mapping</button>
+    </div>
+  </section>
+  <datalist id="pf-options"></datalist>
 </main>
 
 <div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
@@ -448,7 +518,7 @@ function openGame(g){
         <span class="chip">RomM updated <b>${ago(g.romm_last_updated)}</b></span>
       </div>
       ${g.error?`<div class="notice bad">${esc(g.error)}</div>`:""}
-      ${!g.matched?`<div class="notice">This game wasn't found in RomM. Check the platform folder name in <code>platform_mapping.yaml</code> and that the ROM is in your RomM library.</div>`:""}
+      ${!g.matched?`<div class="notice">This game wasn't found in RomM. Check that the <a href="#platforms" onclick="closeModal()">platform for the <code>${esc(g.platform)}</code> folder</a> is right and that the ROM is in your RomM library.</div>`:""}
       ${files?`<table class="files"><thead><tr><th>Type</th><th>File</th><th>Status</th></tr></thead><tbody>${files}</tbody></table>`:`<div class="empty">No file details yet.</div>`}
     </div>`, true);
 }
@@ -603,6 +673,109 @@ function renderActivity(d){
 
 function render(){ const d = state.data; if(!d) return; renderStatus(d); renderApprovals(); renderSystems(d); renderGames(d); renderActivity(d); }
 
+// ---------- platforms view ----------
+const HOW = {mapping:"Your mapping", exact:"Exact", "romm-folder":"RomM folder", "romm-alias":"RomM alias", none:"Not mapped"};
+const pf = { data:null, edits:{}, optionsFor:{} };
+function optLabel(p){ return `${p.name} (${p.slug})`; }
+function slugFromInput(v){
+  v = (v||"").trim(); if(!v) return "";
+  const m = v.match(/\(([^()]+)\)\s*$/); const cand = m ? m[1] : v;
+  return (pf.data.platforms.find(p => p.slug === cand || p.name.toLowerCase() === v.toLowerCase()) || {}).slug || null;
+}
+async function loadPlatforms(force){
+  try { pf.data = await api("api/platforms"); renderPlatforms(); }
+  catch(e){ $("#pf-rows").innerHTML = `<tr><td colspan="5" class="empty">Couldn't load platforms: ${esc(e.message)}</td></tr>`; }
+}
+function renderPlatforms(){
+  const d = pf.data; if(!d) return;
+  const cat = d.catalog;
+  const lib = d.platforms.filter(p=>p.in_library).length;
+  $("#pf-meta").innerHTML = [
+    cat.count ? `<span class="chip accent">${cat.count} RomM platforms · ${esc(cat.source)}</span>` : `<span class="chip bad">RomM platform list not downloaded yet</span>`,
+    cat.fetched_at ? `<span class="chip">updated ${ago(cat.fetched_at)}</span>` : "",
+    cat.aliases ? `<span class="chip">${cat.aliases} built-in folder aliases</span>` : "",
+    `<span class="chip ok">${lib} platform${lib===1?"":"s"} in your library</span>`,
+  ].join("");
+  const notes = [];
+  if (d.mapping_error) notes.push(`<div class="notice bad">Your mapping file couldn't be read (${esc(d.mapping_error)}). Saving here writes a fresh one.</div>`);
+  if (!d.using_ui_file && d.mapping_file) notes.push(`<div class="notice" style="background:var(--info-bg);color:var(--info)">Using the mounted <code>${esc(d.mapping_file)}</code>. When you save here, your mapping is written to <code>${esc(d.ui_mapping_file)}</code>, which is used from then on. The mounted file isn't modified.</div>`);
+  $("#pf-notices").innerHTML = notes.join("");
+
+  $("#pf-options").innerHTML = d.platforms.map(p => `<option value="${esc(optLabel(p))}">${p.in_library?"★ in your RomM · "+p.rom_count+" ROMs":""}</option>`).join("");
+
+  const unmapped = d.folders.filter(f=>f.how==="none").length;
+  const nb = $("#nav-unmapped"); nb.hidden = !unmapped; nb.textContent = unmapped;
+
+  $("#pf-rows").innerHTML = d.folders.map(f => {
+    const edit = pf.edits[f.folder];
+    const dirty = edit !== undefined;
+    const val = dirty ? (edit ? optLabel(d.platforms.find(p=>p.slug===edit) || {name:edit, slug:edit}) : "") :
+                (f.how==="mapping" ? optLabel(d.platforms.find(p=>p.slug===f.slug) || {name:f.name||f.slug, slug:f.slug}) : "");
+    const target = f.slug ? `<div class="nm">${esc(f.name || f.slug)}</div><div class="sl">${esc(f.slug)}${f.in_library?` · ${plural(f.rom_count,"ROM")} in your RomM`:` · <span style="color:var(--warn)">not in your RomM library</span>`}</div>`
+                          : `<span style="color:var(--muted)">—</span>`;
+    return `<tr class="${dirty?"dirty":""}" data-folder="${esc(f.folder)}">
+      <td><div class="pf-folder">${esc(f.folder)}</div></td>
+      <td class="pf-c-games">${f.games}${f.unmatched?` <span style="color:var(--warn)">(${f.unmatched} unmatched)</span>`:""}</td>
+      <td class="pf-target">${target}</td>
+      <td><span class="how how-${f.how}">${HOW[f.how]}</span></td>
+      <td class="pf-c-pick"><div class="pf-pick">
+        <input list="pf-options" placeholder="${f.how==="none"?"Pick a RomM platform…":"Override automatic match…"}" value="${esc(val)}" aria-label="RomM platform for ${esc(f.folder)}">
+        ${(f.how==="mapping" || (dirty && edit)) ? `<button class="iconbtn" data-clear title="Remove mapping (use automatic matching)" aria-label="Remove mapping">✕</button>` : ""}
+      </div></td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="empty">No system folders found in your sync folders yet.</td></tr>`;
+
+  $("#pf-rows").querySelectorAll("tr[data-folder]").forEach(tr => {
+    const folder = tr.dataset.folder, f = d.folders.find(x=>x.folder===folder), input = tr.querySelector("input");
+    input.onchange = () => {
+      const v = input.value.trim();
+      if (!v) { setEdit(folder, f.how==="mapping" ? null : undefined); return; }
+      const slug = slugFromInput(v);
+      if (!slug) { input.classList.add("bad"); toast("Pick a platform from the list"); return; }
+      input.classList.remove("bad");
+      setEdit(folder, (f.how==="mapping" && f.slug===slug) ? undefined : slug);
+    };
+    const clr = tr.querySelector("[data-clear]");
+    if (clr) clr.onclick = () => setEdit(folder, f.how==="mapping" ? null : undefined);
+  });
+  renderSavebar();
+}
+function setEdit(folder, slug){ if (slug === undefined) delete pf.edits[folder]; else pf.edits[folder] = slug; renderPlatforms(); }
+function renderSavebar(){
+  const n = Object.keys(pf.edits).length;
+  $("#pf-savebar").hidden = !n;
+  $("#pf-dirty-count").textContent = `${n} unsaved change${n===1?"":"s"}`;
+}
+$("#pf-discard").onclick = () => { pf.edits = {}; renderPlatforms(); };
+$("#pf-save").onclick = async () => {
+  const items = Object.entries(pf.edits).map(([folder, slug]) => {
+    const p = slug && pf.data.platforms.find(x=>x.slug===slug);
+    return `<li><code>${esc(folder)}</code> → ${slug ? `<b>${esc(p ? p.name : slug)}</b> <span style="color:var(--muted)">(${esc(slug)})</span>` : `<i>automatic matching</i>`}</li>`;
+  }).join("");
+  const ok = await confirmBox({title:"Save platform mapping?", body:`<ul style="margin:0 0 10px;padding-left:18px">${items}</ul><p style="margin:0;color:var(--muted)">A sync runs right after, so games in these folders get re-matched.</p>`, ok:"Save & sync"});
+  if (!ok) return;
+  try {
+    pf.data = await api("api/platforms/mapping", {method:"PUT", body:JSON.stringify({choices: pf.edits})});
+    pf.edits = {}; renderPlatforms(); toast("Mapping saved — syncing");
+    setTimeout(loadPlatforms, 4000);
+  } catch(e){ toast("⚠ "+e.message); }
+};
+$("#pf-refresh").onclick = async () => {
+  const b = $("#pf-refresh"); b.disabled = true; b.textContent = "⟳ Downloading…";
+  try { pf.data = await api("api/platforms/refresh", {method:"POST"}); renderPlatforms(); toast(`Platform list updated (${pf.data.catalog.count} platforms)`); }
+  catch(e){ toast("⚠ "+e.message); }
+  b.disabled = false; b.textContent = "⟳ Update platform list from RomM GitHub";
+};
+
+// ---------- routing ----------
+function route(){
+  const plat = location.hash === "#platforms";
+  $("#view-dash").hidden = plat; $("#view-plat").hidden = !plat;
+  document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", (a.dataset.view==="plat") === plat));
+  if (plat) loadPlatforms();
+}
+window.addEventListener("hashchange", route);
+window.addEventListener("beforeunload", e => { if (Object.keys(pf.edits).length) { e.preventDefault(); e.returnValue = ""; } });
+
 let timer = null, fails = 0;
 async function poll(){
   clearTimeout(timer);
@@ -622,7 +795,10 @@ $("#status-filter").querySelectorAll("button").forEach(b => b.onclick = () => {
   state.filter = b.dataset.f; state.lastHash.games = null; render();
 });
 setInterval(()=>{ if(state.data) renderStatus(state.data); }, 15000); // keep "x min ago" fresh
+route();
 poll();
+// unmapped-folder badge on the nav even while on the dashboard
+api("api/platforms").then(d => { if(!pf.data){ pf.data = d; const n = d.folders.filter(f=>f.how==="none").length; const nb=$("#nav-unmapped"); nb.hidden=!n; nb.textContent=n; } }).catch(()=>{});
 </script>
 </body>
 </html>

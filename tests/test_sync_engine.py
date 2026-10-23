@@ -114,3 +114,33 @@ def test_timestamp_formats_compare_equal():
 def test_romm_version_tag_is_stripped_from_local_name():
     assert local_name_for_remote({"file_name": "Game (USA) [2026-10-01 12-00-00-000].srm"}) == "Game (USA).srm"
     assert local_name_for_remote({"file_name": "Game (USA).state1"}) == "Game (USA).state1"
+
+
+# --- platform resolution / catalog parsing (src.platforms) ------------------
+from src import platforms as pf  # noqa: E402
+
+
+def test_platform_resolution_order():
+    mapping = {"snes": ["SFC"], "gba": ["gba"]}
+    lib, lib_fs, aliases = {"snes", "gba", "genesis", "psx"}, {"playstation": "psx"}, {"megadrive": "genesis"}
+    assert pf.resolve("sfc", mapping, lib, lib_fs, aliases) == ("snes", "mapping")
+    assert pf.resolve("GBA", mapping, lib, lib_fs, aliases) == ("gba", "exact")
+    assert pf.resolve("genesis", mapping, lib, lib_fs, aliases) == ("genesis", "exact")
+    assert pf.resolve("PlayStation", mapping, lib, lib_fs, aliases) == ("psx", "romm-folder")
+    assert pf.resolve("megadrive", mapping, lib, lib_fs, aliases) == ("genesis", "romm-alias")
+    assert pf.resolve("GameBoy Color", mapping, lib, lib_fs, aliases) == (None, "none")
+
+
+def test_apply_folder_choices_moves_and_clears():
+    m = {"snes": ["sfc", "snes"], "genesis": ["md"]}
+    out = pf.apply_folder_choices(m, {"SFC": "sfam", "md": None})
+    assert out == {"snes": ["snes"], "sfam": ["SFC"]}
+
+
+def test_parse_github_sources():
+    slugs = pf.parse_slugs('class UniversalPlatformSlug(enum.StrEnum):\n    _3DO = "3do"\n    GENESIS = "genesis"\n')
+    assert slugs == {"_3DO": "3do", "GENESIS": "genesis"}
+    aliases = pf.parse_aliases('PLATFORM_FS_ALIASES: Final[dict[str, UPS]] = {\n    "megadrive": UPS.GENESIS,\n    "x": UPS.NOPE,\n}\n', slugs)
+    assert aliases == {"megadrive": "genesis"}
+    names = pf.parse_docs_names("| Name | Folder | x |\n| --- | --- | --- |\n| Sega Mega Drive/Genesis | `genesis` | ... |\n")
+    assert names == {"genesis": "Sega Mega Drive/Genesis"}

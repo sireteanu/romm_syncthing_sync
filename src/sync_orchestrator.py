@@ -137,6 +137,9 @@ class SyncOrchestrator:
             result = SyncResult()
             try:
                 STATE.set_phase("building", "Reading RomM library and sync folders")
+                # Weekly refresh of RomM's platform list/aliases from GitHub (no-op when fresh).
+                from . import platforms as platform_catalog
+                platform_catalog.ensure_catalog(self.app_cfg.ROMM_CREDENTIALS.version())
                 # Initialize a fresh state for the romm library and local library
                 self.srv, self.lcl = self.build_libraries(self.app_cfg)
 

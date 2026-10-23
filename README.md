@@ -23,6 +23,7 @@ A utility for syncing emulator save files and save states across your gaming dev
   - **keep the RomM version**
   - **keep both** (your local copy is stored on RomM as a separate `(conflict …)` entry)
 - **Backups.** Before any file is overwritten (on either side), the version being replaced is copied to `/data/backups/<date>/<system>/`.
+- **Platforms page** to map your system folders to RomM platforms. It uses RomM's official platform list and folder aliases, fetched from RomM's GitHub.
 - **Unraid template** with the web UI link, icon and all settings.
 - **Automatic releases.** Every change pushed to the default branch is tested, tagged, released and published as a Docker image.
 
@@ -112,7 +113,7 @@ This doesn't download ROMs or manage your library. For devices that can run a re
    - **Saves folder** / **States folder**: your Syncthing folders, e.g. `/mnt/user/syncthing/saves`
    - **App data**: `/mnt/user/appdata/romm-sync`
    - **RomM URL** and **RomM API token**
-3. *(Optional)* Download [`platform_mapping.yaml`](platform_mapping.yaml) into `/mnt/user/appdata/romm-sync/`.
+3. *(Optional)* Download [`platform_mapping.yaml`](platform_mapping.yaml) into `/mnt/user/appdata/romm-sync/`. You can also skip it and map folders on the dashboard's **Platforms** page.
 4. **Apply**, then click the container icon → **WebUI**.
 
 If your saves and states live in **one** folder: switch to **Advanced View**, remove the States folder path and the `SAVE_SYNC_FOLDER` / `STATE_SYNC_FOLDER` variables, change the Saves folder's container path to `/syncdata`, and add a variable `ALL_SYNC_FOLDER` = `/syncdata`.
@@ -212,7 +213,27 @@ A full sync now fetches all saves and states in two API calls instead of two per
 The dashboard has no other login. Don't expose it to the internet without a password or a reverse proxy with auth.
 
 ### Platform mapping
-A `.yaml` file is included that you can edit to map your platform directories (i.e. snes, nds,...) to the platform "slug" that RomM expects. The app forces a match by game platform, similar to how RomM's uploads work, so this mapping file is required if the platform folder names in your library are different from RomM's. By default, this list attempts to cover some common systems and alternative slugs used in MinUI/NextUI and Knulli, but it is NOT exhaustive. Keep an eye on the **Not in RomM** badge in the dashboard.
+
+Each system folder in your sync folders (`snes`, `md`, `Nintendo 64`, …) has to point at a RomM platform so its saves can be matched to games. Open the **Platforms** tab in the dashboard to see how every folder resolves and fix the ones that don't:
+
+![Platforms page: each sync folder with the RomM platform it matches, how it was matched, and a searchable picker](docs/screenshots/platforms.png)
+
+Folders are resolved in this order, and most never need a mapping:
+
+1. **Your mapping**: chosen on the Platforms page (or in `platform_mapping.yaml`)
+2. **Exact**: the folder name is a RomM platform slug (`snes`, `gba`, `n64`…)
+3. **RomM folder**: the folder has the same name as that platform's folder in *your* RomM library
+4. **RomM alias**: one of RomM's built-in folder aliases for Batocera / RetroBat / ES-DE names (`megadrive`, `amstradcpc`, `atarilynx`…)
+
+**Where the platform list comes from:** the full list of platforms RomM supports (459 at the time of writing) and RomM's folder aliases are downloaded from GitHub. Slugs and aliases come from [`rommapp/romm`](https://github.com/rommapp/romm), fetched at the tag that matches your RomM server's version when that tag exists, with display names from [`rommapp/docs`](https://github.com/rommapp/docs). The list is cached in `/data/romm_platforms.json` and refreshed weekly, or whenever you click **Update platform list from RomM GitHub**. If GitHub can't be reached, the cached list is used. In the picker, platforms that are already in your RomM library are listed first.
+
+**The mapping file:** saving on the Platforms page writes `/data/platform_mapping.yaml`. If you also mount a `platform_mapping.yaml` (the original setup), it's used until you first save in the UI. After that it's only the starting point and is never modified. The format is unchanged:
+```yaml
+genesis:        # RomM platform slug
+  - md          # your folder names (case-insensitive)
+  - megadrive
+```
+The bundled [`platform_mapping.yaml`](platform_mapping.yaml) (from the original project) covers common MinUI/NextUI and Knulli folder names. With the Platforms page it's optional.
 
 See https://docs.romm.app/latest/Platforms-and-Players/Supported-Platforms/ for RomM's supported platforms.
 
