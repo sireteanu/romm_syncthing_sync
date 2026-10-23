@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>romm_sync</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c5cff'/%3E%3Cpath d='M9 12a7 7 0 0 1 12-3l2-2v6h-6l2-2a4 4 0 0 0-7 2zM23 20a7 7 0 0 1-12 3l-2 2v-6h6l-2 2a4 4 0 0 0 7-2z' fill='white'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0e1014; --surface:#161920; --surface-2:#1d212a; --line:#2a2f3a; --text:#e8eaf0; --muted:#9097a6; --faint:#5d6473;
+  --accent:#7c5cff; --accent-ink:#fff; --ok:#3ccf8e; --warn:#f2b33d; --bad:#ff5d6c; --info:#5aa7ff;
+  --ok-bg:rgba(60,207,142,.12); --warn-bg:rgba(242,179,61,.13); --bad-bg:rgba(255,93,108,.13); --info-bg:rgba(90,167,255,.12); --accent-bg:rgba(124,92,255,.15);
+  --radius:12px; --shadow:0 10px 40px rgba(0,0,0,.45);
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f4f5f8; --surface:#fff; --surface-2:#f0f1f5; --line:#e1e4ea; --text:#171a21; --muted:#5c6372; --faint:#8a91a0;
+    --accent:#6a48f5; --ok:#139a63; --warn:#b97a00; --bad:#d6283b; --info:#1f6fd1; --shadow:0 10px 40px rgba(20,24,40,.15);
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f4f5f8; --surface:#fff; --surface-2:#f0f1f5; --line:#e1e4ea; --text:#171a21; --muted:#5c6372; --faint:#8a91a0;
+  --accent:#6a48f5; --ok:#139a63; --warn:#b97a00; --bad:#d6283b; --info:#1f6fd1; --shadow:0 10px 40px rgba(20,24,40,.15);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit}
+a{color:var(--accent)}
+.wrap{max-width:1360px;margin:0 auto;padding:0 20px 60px}
+header.top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+header.top .wrap{display:flex;align-items:center;gap:14px;height:60px;padding-bottom:0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px;font-size:16px}
+.brand .logo{width:28px;height:28px;border-radius:8px;background:var(--accent);display:grid;place-items:center}
+.brand small{font-weight:500;color:var(--muted);font-size:12px}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;font-size:12px;background:var(--surface-2);color:var(--muted);border:1px solid var(--line);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+.dot.ok{background:var(--ok)} .dot.busy{background:var(--info);animation:pulse 1.2s infinite} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+@keyframes pulse{50%{opacity:.35}}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);background:var(--surface-2);padding:7px 13px;border-radius:9px;cursor:pointer;font-weight:550;white-space:nowrap}
+.btn:hover{border-color:var(--faint)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.danger{color:var(--bad)} .btn.ok{color:var(--ok)}
+.btn.small{padding:4px 10px;font-size:12.5px;border-radius:8px}
+.btn:disabled{opacity:.5;cursor:default}
+.iconbtn{border:0;background:transparent;cursor:pointer;color:var(--muted);padding:6px;border-radius:8px}
+.iconbtn:hover{background:var(--surface-2);color:var(--text)}
+
+section{margin-top:22px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 10px;font-weight:650;display:flex;align-items:center;gap:10px}
+h2 .count{background:var(--surface-2);border:1px solid var(--line);border-radius:99px;padding:0 8px;font-size:11.5px;letter-spacing:0;color:var(--text)}
+
+/* status */
+.status{display:grid;grid-template-columns:1.5fr 1fr;gap:0}
+.status .main{padding:18px 20px;border-right:1px solid var(--line)}
+.status .side{padding:18px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px 18px;align-content:start}
+.phase{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.phase .label{font-size:22px;font-weight:700}
+.phase .detail{color:var(--muted)}
+.bar{height:10px;background:var(--surface-2);border-radius:99px;overflow:hidden;margin:14px 0 8px;border:1px solid var(--line)}
+.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,var(--info)));border-radius:99px;transition:width .5s ease}
+.bar.indeterminate>i{width:35%!important;animation:slide 1.3s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-35%}100%{margin-left:100%}}
+.progress-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px;gap:10px}
+.progress-meta b{color:var(--text);font-weight:600}
+.kv .k{color:var(--muted);font-size:12px}
+.kv .v{font-weight:600;font-variant-numeric:tabular-nums}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.chip{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);font-variant-numeric:tabular-nums}
+.chip b{color:var(--text)}
+.chip.ok{background:var(--ok-bg);border-color:transparent;color:var(--ok)}
+.chip.warn{background:var(--warn-bg);border-color:transparent;color:var(--warn)}
+.chip.bad{background:var(--bad-bg);border-color:transparent;color:var(--bad)}
+.chip.info{background:var(--info-bg);border-color:transparent;color:var(--info)}
+.chip.accent{background:var(--accent-bg);border-color:transparent;color:var(--accent)}
+.notice{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:13px}
+.notice.bad{background:var(--bad-bg);color:var(--bad)}
+
+/* approvals */
+.approvals{overflow:hidden}
+.ap-head{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.ap-head .title{font-weight:650}
+.ap-head .muted{color:var(--muted);font-size:12.5px}
+.tabs{display:flex;gap:4px;padding:8px 10px 0 10px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{border:0;background:transparent;padding:8px 12px;border-bottom:2px solid transparent;cursor:pointer;color:var(--muted);font-weight:600;display:flex;gap:7px;align-items:center;white-space:nowrap}
+.tab.active{color:var(--text);border-bottom-color:var(--accent)}
+.tab .n{font-size:11px;background:var(--surface-2);border-radius:99px;padding:0 7px}
+.tab.conf .n{background:var(--bad-bg);color:var(--bad)}
+.ap-list{max-height:430px;overflow:auto}
+.ap-row{display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:14px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--line)}
+.ap-row:last-child{border-bottom:0}
+.ap-row .thumb{width:52px;height:40px;border-radius:7px;background:var(--surface-2) center/cover no-repeat;border:1px solid var(--line)}
+.ap-row .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-row .file{font-family:var(--mono);font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ap-row .why{font-size:12px;color:var(--faint)}
+.ap-row .acts{display:flex;gap:6px}
+.dir{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:6px;margin-right:6px}
+.dir.up{background:var(--info-bg);color:var(--info)} .dir.down{background:var(--ok-bg);color:var(--ok)} .dir.conf{background:var(--bad-bg);color:var(--bad)}
+.empty{padding:26px;text-align:center;color:var(--muted)}
+
+/* systems */
+.systems{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px}
+.sys{padding:14px;cursor:pointer;transition:border-color .15s, transform .15s;position:relative}
+.sys:hover{border-color:var(--faint)}
+.sys.active{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.sys .top{display:flex;align-items:center;gap:10px}
+.sys .icon{width:36px;height:36px;border-radius:9px;background:var(--surface-2);display:grid;place-items:center;overflow:hidden;flex:none;font-weight:700;color:var(--muted);font-size:12px}
+.sys .icon img{width:30px;height:30px;object-fit:contain}
+.sys .nm{font-weight:650;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sys .sub{font-size:12px;color:var(--muted)}
+.seg{display:flex;height:6px;border-radius:99px;overflow:hidden;background:var(--surface-2);margin-top:12px}
+.seg i{display:block;height:100%}
+.seg .s-ok{background:var(--ok)} .seg .s-pend{background:var(--warn)} .seg .s-conf{background:var(--bad)} .seg .s-un{background:var(--faint)} .seg .s-err{background:var(--bad);opacity:.6}
+.sys .legend{display:flex;gap:10px;margin-top:8px;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+
+/* games */
+.toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.search{flex:1;min-width:200px;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 12px}
+.search input{border:0;background:transparent;color:var(--text);padding:9px 0;width:100%;outline:none;font:inherit}
+.seg-ctl{display:flex;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
+.seg-ctl button{border:0;background:transparent;padding:5px 11px;border-radius:7px;cursor:pointer;color:var(--muted);font-weight:600;font-size:12.5px}
+.seg-ctl button.on{background:var(--surface-2);color:var(--text)}
+.games{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.game{overflow:hidden;cursor:pointer;display:flex;flex-direction:column;transition:border-color .15s}
+.game:hover{border-color:var(--faint)}
+.shot{aspect-ratio:4/3;background:var(--surface-2) center/cover no-repeat;position:relative;image-rendering:pixelated}
+.shot.noimg{display:grid;place-items:center;color:var(--faint);font-size:12px}
+.shot .cover{position:absolute;left:10px;bottom:-22px;width:46px;height:62px;border-radius:6px;background:var(--surface) center/cover no-repeat;border:2px solid var(--surface);box-shadow:0 4px 14px rgba(0,0,0,.4);image-rendering:auto}
+.shot .badge{position:absolute;right:8px;top:8px}
+.game .body{padding:12px 12px 12px 66px;min-height:72px}
+.game .body.nocover{padding-left:12px}
+.game .title{font-weight:650;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.game .plat{font-size:12px;color:var(--muted);margin-top:2px}
+.game .counts{display:flex;gap:10px;font-size:12px;color:var(--muted);padding:0 12px 12px;font-variant-numeric:tabular-nums}
+.status-badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px;backdrop-filter:blur(6px);text-transform:uppercase;letter-spacing:.04em}
+.st-synced{background:var(--ok-bg);color:var(--ok)} .st-pending{background:var(--warn-bg);color:var(--warn)}
+.st-conflict{background:var(--bad-bg);color:var(--bad)} .st-error{background:var(--bad-bg);color:var(--bad)}
+.st-unmatched{background:var(--surface-2);color:var(--muted)} .st-romm-only{background:var(--info-bg);color:var(--info)}
+.shot .status-badge{background:rgba(10,12,16,.72)}
+.shot .status-badge.st-synced{color:#5fe3a8} .shot .status-badge.st-pending{color:#ffc95c} .shot .status-badge.st-conflict,.shot .status-badge.st-error{color:#ff8390} .shot .status-badge.st-unmatched{color:#c2c7d2} .shot .status-badge.st-romm-only{color:#8cc3ff}
+
+/* activity */
+details.activity summary{cursor:pointer;list-style:none;padding:14px 16px;display:flex;align-items:center;gap:10px;font-weight:650}
+details.activity summary::-webkit-details-marker{display:none}
+.log{font-family:var(--mono);font-size:12px;max-height:320px;overflow:auto;border-top:1px solid var(--line);padding:8px 0}
+.log div{padding:2px 16px;display:grid;grid-template-columns:72px 70px 1fr;gap:10px;color:var(--muted)}
+.log .l-WARNING{color:var(--warn)} .log .l-ERROR,.log .l-CRITICAL{color:var(--bad)} .log .l-SUCCESS{color:var(--ok)}
+.log .m{color:var(--text);white-space:pre-wrap;word-break:break-word}
+
+/* modal */
+.scrim{position:fixed;inset:0;background:rgba(5,6,10,.6);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+.scrim.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);width:min(560px,100%);max-height:calc(100vh - 32px);overflow:auto}
+.modal.wide{width:min(860px,100%)}
+.modal .mh{padding:18px 20px 6px;display:flex;align-items:flex-start;gap:12px}
+.modal .mh h3{margin:0;font-size:18px}
+.modal .mh p{margin:4px 0 0;color:var(--muted)}
+.modal .mb{padding:12px 20px}
+.modal .mf{padding:14px 20px 18px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.side-card{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface-2)}
+.side-card .hd{padding:10px 12px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.side-card .im.none{aspect-ratio:auto;height:54px}
+.side-card .im{aspect-ratio:4/3;background:var(--bg) center/contain no-repeat;border-top:1px solid var(--line);border-bottom:1px solid var(--line);image-rendering:pixelated;display:grid;place-items:center;color:var(--faint);font-size:12px}
+.side-card dl{margin:0;padding:10px 12px;display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:12.5px}
+.side-card dt{color:var(--muted)} .side-card dd{margin:0;font-variant-numeric:tabular-nums;word-break:break-all}
+.newer{font-size:10.5px;padding:2px 7px;border-radius:99px;background:var(--accent-bg);color:var(--accent);text-transform:uppercase;letter-spacing:.05em}
+.choices{display:grid;gap:8px;margin-top:14px}
+.choice{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);cursor:pointer}
+.choice:hover{border-color:var(--accent)}
+.choice .t{font-weight:650} .choice .d{font-size:12.5px;color:var(--muted)}
+.choice .ic{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:var(--surface-2);font-size:16px}
+.files{width:100%;border-collapse:collapse;font-size:13px}
+.files td,.files th{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left}
+.files th{color:var(--muted);font-weight:600;font-size:12px}
+.files td.f{font-family:var(--mono);font-size:12px;word-break:break-all}
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--text);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;transition:all .25s;z-index:60;max-width:90vw}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
+@media (max-width:860px){
+  .status{grid-template-columns:1fr}
+  .status .main{border-right:0;border-bottom:1px solid var(--line)}
+  .cmp{grid-template-columns:1fr}
+  .ap-row{grid-template-columns:44px minmax(0,1fr)}
+  .ap-row .acts{grid-column:1 / -1;justify-content:flex-end}
+  .wrap{padding:0 14px 40px}
+  .brand small{display:none}
+  #mode-pill{display:none}
+  #conn span:last-child{display:none}
+  header.top .wrap{gap:8px}
+  .seg-ctl{max-width:100%;overflow-x:auto}
+  .toolbar{flex-direction:column;align-items:stretch}
+}
+html,body{overflow-x:hidden}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brand">
+    <div class="logo"><svg width="18" height="18" viewBox="0 0 32 32"><path d="M9 12a7 7 0 0 1 12-3l2-2v6h-6l2-2a4 4 0 0 0-7 2zM23 20a7 7 0 0 1-12 3l-2 2v-6h6l-2 2a4 4 0 0 0 7-2z" fill="white"/></svg></div>
+    <div>romm_sync <small id="romm-url"></small></div>
+  </div>
+  <div class="spacer"></div>
+  <span class="pill" id="conn"><span class="dot"></span><span>connecting…</span></span>
+  <span class="pill" id="mode-pill" title="Sync mode"></span>
+  <button class="iconbtn" id="theme-btn" title="Toggle light / dark" aria-label="Toggle light / dark"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+  <button class="btn primary" id="sync-btn">⟳ Sync now</button>
+</div></header>
+
+<main class="wrap">
+  <section>
+    <div class="card status">
+      <div class="main">
+        <div class="phase"><span class="label" id="phase-label">Starting…</span><span class="detail" id="phase-detail"></span></div>
+        <div class="bar" id="bar"><i></i></div>
+        <div class="progress-meta"><span id="progress-text"></span><span id="current-game"></span></div>
+        <div class="chips" id="result-chips"></div>
+        <div id="notices"></div>
+      </div>
+      <div class="side">
+        <div class="kv"><div class="k">Last sync</div><div class="v" id="last-sync">—</div></div>
+        <div class="kv"><div class="k">Next RomM check</div><div class="v" id="next-sync">—</div></div>
+        <div class="kv"><div class="k">Folder → RomM (new files)</div><div class="v" id="push-mode">—</div></div>
+        <div class="kv"><div class="k">RomM → Folder</div><div class="v" id="pull-mode">—</div></div>
+        <div class="kv"><div class="k">Games tracked</div><div class="v" id="games-count">—</div></div>
+        <div class="kv"><div class="k">Systems</div><div class="v" id="systems-count">—</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="approvals-section" hidden>
+    <h2>Needs your attention <span class="count" id="pending-count">0</span></h2>
+    <div class="card approvals">
+      <div class="tabs" id="ap-tabs"></div>
+      <div class="ap-head" id="ap-head"></div>
+      <div class="ap-list" id="ap-list"></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Systems <span class="count" id="sys-count">0</span></h2>
+    <div class="systems" id="systems"></div>
+  </section>
+
+  <section>
+    <h2>Games <span class="count" id="game-count">0</span></h2>
+    <div class="toolbar">
+      <div class="search"><span style="color:var(--faint)">⌕</span><input id="q" placeholder="Search games…" autocomplete="off"></div>
+      <div class="seg-ctl" id="status-filter">
+        <button data-f="all" class="on">All</button><button data-f="attention">Needs attention</button><button data-f="synced">Synced</button><button data-f="unmatched">Unmatched</button>
+      </div>
+    </div>
+    <div class="games" id="games"></div>
+  </section>
+
+  <section>
+    <details class="card activity" id="activity">
+      <summary>Activity <span class="count" id="act-count" style="font-weight:500"></span><span class="spacer"></span><span style="color:var(--muted);font-size:12px">show / hide</span></summary>
+      <div class="log" id="log"></div>
+    </details>
+  </section>
+
+  <footer>
+    romm_sync GUI fork · based on <a href="https://github.com/amn-96/romm_syncthing_sync" target="_blank" rel="noopener">romm_syncthing_sync</a> by amn-96 (MIT) ·
+    talks to <a id="romm-link" href="#" target="_blank" rel="noopener">your RomM</a>
+  </footer>
+</main>
+
+<div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const state = { data:null, system:null, filter:"all", q:"", tab:null, lastHash:{} , busy:new Set() };
+
+// ---------- theme ----------
+(function(){
+  let t = null; try { t = localStorage.getItem("rs-theme"); } catch(e){}
+  if (t) document.documentElement.dataset.theme = t;
+  $("#theme-btn").onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    const next = cur === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("rs-theme", next); } catch(e){}
+  };
+})();
+
+// ---------- helpers ----------
+function ago(iso){
+  if(!iso) return "—";
+  const s = (Date.now() - new Date(iso).getTime())/1000;
+  if (s < -5) { const f=-s; return "in " + (f<60?Math.round(f)+"s":f<3600?Math.round(f/60)+" min":Math.round(f/3600)+" h"); }
+  if (s < 10) return "just now";
+  if (s < 60) return Math.round(s)+"s ago";
+  if (s < 3600) return Math.round(s/60)+" min ago";
+  if (s < 86400) return Math.round(s/3600)+" h ago";
+  return new Date(iso).toLocaleDateString();
+}
+function plural(n, w){ return `${n} ${w}${n===1?"":"s"}`; }
+function when(iso){ return iso ? new Date(iso).toLocaleString() : "—"; }
+function size(n){ if(n==null) return "—"; if(n<1024) return n+" B"; if(n<1048576) return (n/1024).toFixed(1)+" KB"; return (n/1048576).toFixed(2)+" MB"; }
+function img(ref){
+  if(!ref) return null;
+  if(ref.src==="romm") return "img/romm?p="+encodeURIComponent(ref.path);
+  if(ref.src==="local") return "img/local?p="+encodeURIComponent(ref.path);
+  if(ref.src==="url") return ref.path;
+  return null;
+}
+function hashOf(o){ return JSON.stringify(o); }
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove("show"),3200); }
+async function api(path, opts={}){
+  const r = await fetch(path, {headers:{"content-type":"application/json"}, ...opts});
+  let body = null; try { body = await r.json(); } catch(e){}
+  if(!r.ok) throw new Error((body && (body.message||body.detail)) || ("HTTP "+r.status));
+  return body;
+}
+const PHASES = {starting:"Starting", idle:"Up to date", building:"Scanning", fetching:"Talking to RomM", syncing:"Syncing", applying:"Applying", error:"Problem"};
+const STATUS_LABEL = {synced:"Synced", pending:"Awaiting approval", conflict:"Conflict", error:"Error", unmatched:"Not in RomM", "romm-only":"Only on RomM"};
+const KIND = {
+  push_new:{dir:"up", label:"Upload", tab:"push"}, push_update:{dir:"up", label:"Upload", tab:"push"},
+  pull_new:{dir:"down", label:"Download", tab:"pull"}, pull_update:{dir:"down", label:"Download", tab:"pull"},
+  conflict:{dir:"conf", label:"Conflict", tab:"conflict"},
+};
+const MODE = {confirm:"Ask first", auto:"Automatic", off:"Off"};
+
+// ---------- modal ----------
+function openModal(html, wide=false){ const m=$("#modal"); m.className="modal"+(wide?" wide":""); m.innerHTML=html; $("#scrim").classList.add("open"); }
+function closeModal(){ $("#scrim").classList.remove("open"); $("#modal").innerHTML=""; }
+$("#scrim").addEventListener("click", e => { if(e.target.id==="scrim") closeModal(); });
+document.addEventListener("keydown", e => { if(e.key==="Escape") closeModal(); });
+function confirmBox({title, body, ok="Confirm", danger=false}){
+  return new Promise(res => {
+    openModal(`<div class="mh"><div><h3>${esc(title)}</h3></div></div>
+      <div class="mb">${body}</div>
+      <div class="mf"><button class="btn" id="c-no">Cancel</button><button class="btn ${danger?"danger":"primary"}" id="c-ok">${esc(ok)}</button></div>`);
+    $("#c-no").onclick = () => { closeModal(); res(false); };
+    $("#c-ok").onclick = () => { closeModal(); res(true); };
+    $("#c-ok").focus();
+  });
+}
+
+// ---------- actions ----------
+async function decide(id, decision){
+  state.busy.add(id); renderApprovals(true);
+  try{
+    const r = await api("api/actions/"+id, {method:"POST", body:JSON.stringify({decision})});
+    toast(r.message || "Done");
+  }catch(e){ toast("⚠ "+e.message); }
+  finally{ state.busy.delete(id); poll(); }
+}
+async function bulk(ids, decision){
+  if(!ids.length) return;
+  ids.forEach(i=>state.busy.add(i)); renderApprovals(true);
+  try{ await api("api/actions/bulk", {method:"POST", body:JSON.stringify({ids, decision})}); toast(`Working on ${ids.length} item(s)…`); }
+  catch(e){ toast("⚠ "+e.message); }
+  setTimeout(()=>{ ids.forEach(i=>state.busy.delete(i)); poll(); }, 1500);
+}
+function actionThumb(a){
+  const g = findGame(a.platform, a.game);
+  if (a.romm_screenshot) return "img/romm?p="+encodeURIComponent(a.romm_screenshot);
+  if (a.local_screenshot) return "img/local?p="+encodeURIComponent(a.local_screenshot);
+  return g ? (img(g.screenshot) || img(g.cover)) : null;
+}
+function findGame(platform, name){ return (state.data?.games||[]).find(g => g.platform===platform && g.name===name); }
+
+async function approveOne(a){
+  const k = KIND[a.kind];
+  const overwrite = a.kind.endsWith("_update");
+  const target = k.dir==="up" ? "RomM" : "the sync folder";
+  const ok = await confirmBox({
+    title: `${k.label} ${a.file_type}?`,
+    body: `<p style="margin:0 0 8px"><b>${esc(a.game)}</b> <span style="color:var(--muted)">· ${esc(a.platform)}</span></p>
+           <p style="margin:0 0 8px;font-family:var(--mono);font-size:12.5px">${esc(a.file_name)}</p>
+           <p style="margin:0;color:var(--muted)">${overwrite
+              ? `This <b>overwrites</b> the copy in ${target}. The current version is backed up first.`
+              : `This adds a new file to ${target}.`}</p>`,
+    ok: k.label
+  });
+  if (ok) decide(a.id, "approve");
+}
+async function approveAll(list, label){
+  const overwrites = list.filter(a => a.kind.endsWith("_update")).length;
+  const ok = await confirmBox({
+    title: `${label} ${list.length} file${list.length>1?"s":""}?`,
+    body: `<ul style="margin:0 0 10px;padding-left:18px;max-height:220px;overflow:auto">${list.slice(0,40).map(a=>`<li><b>${esc(a.game)}</b> — <span style="font-family:var(--mono);font-size:12px">${esc(a.file_name)}</span></li>`).join("")}${list.length>40?`<li>…and ${list.length-40} more</li>`:""}</ul>
+           ${overwrites?`<p style="margin:0;color:var(--warn)">${overwrites} of these overwrite an existing copy (backed up first).</p>`:""}`,
+    ok: `${label} ${list.length}`
+  });
+  if (ok) bulk(list.map(a=>a.id), "approve");
+}
+
+function openConflict(a){
+  const lt = a.local_mtime ? new Date(a.local_mtime) : null, rt = a.romm_updated_at ? new Date(a.romm_updated_at) : null;
+  const localNewer = lt && rt && lt > rt, rommNewer = lt && rt && rt > lt;
+  const lshot = a.local_screenshot ? "img/local?p="+encodeURIComponent(a.local_screenshot) : null;
+  const rshot = a.romm_screenshot ? "img/romm?p="+encodeURIComponent(a.romm_screenshot) : null;
+  const im = (u) => u ? `<div class="im" style="background-image:url('${u}')"></div>` : `<div class="im none">${a.file_type==="save"?"save file — no screenshot":"no screenshot"}</div>`;
+  openModal(`
+    <div class="mh"><div><h3>Resolve conflict</h3>
+      <p><b>${esc(a.game)}</b> · ${esc(a.platform)} · <span style="font-family:var(--mono);font-size:12.5px">${esc(a.file_name)}</span></p>
+      <p style="color:var(--warn)">${esc(a.reason)}. Nothing has been overwritten yet.</p></div></div>
+    <div class="mb">
+      <div class="cmp">
+        <div class="side-card"><div class="hd">In your sync folder ${localNewer?'<span class="newer">newer</span>':""}</div>${im(lshot)}
+          <dl><dt>Modified</dt><dd>${when(a.local_mtime)}</dd><dt>Size</dt><dd>${size(a.local_size)}</dd><dt>MD5</dt><dd style="font-family:var(--mono)">${esc((a.local_hash||"").slice(0,12))}…</dd></dl></div>
+        <div class="side-card"><div class="hd">On RomM ${rommNewer?'<span class="newer">newer</span>':""}</div>${im(rshot)}
+          <dl><dt>Modified</dt><dd>${when(a.romm_updated_at)}</dd><dt>Size</dt><dd>${size(a.romm_size)}</dd><dt>MD5</dt><dd style="font-family:var(--mono)">${a.romm_hash?esc(a.romm_hash.slice(0,12))+"…":"not reported"}</dd></dl></div>
+      </div>
+      <div class="choices">
+        <button class="choice" data-c="local"><span class="ic">⬆</span><span><div class="t">Keep the sync-folder version</div><div class="d">Overwrites the RomM copy. RomM's version is saved to the backups folder first.</div></span></button>
+        <button class="choice" data-c="romm"><span class="ic">⬇</span><span><div class="t">Keep the RomM version</div><div class="d">Overwrites the file in your sync folder. Your local version is saved to the backups folder first.</div></span></button>
+        <button class="choice" data-c="both"><span class="ic">⧉</span><span><div class="t">Keep both</div><div class="d">Your local version is uploaded to RomM as a separate "(conflict …)" copy, then the RomM version is used everywhere.</div></span></button>
+      </div>
+    </div>
+    <div class="mf"><button class="btn danger" data-c="reject">Ignore this change</button><span class="spacer"></span><button class="btn" data-c="close">Decide later</button></div>`, true);
+  $("#modal").querySelectorAll("[data-c]").forEach(b => b.onclick = async () => {
+    const c = b.dataset.c;
+    if (c === "close") return closeModal();
+    if (c === "reject") {
+      closeModal();
+      const ok = await confirmBox({title:"Ignore this conflict?", body:`<p style="margin:0">Both copies stay as they are and you won't be asked again until one of them changes.</p>`, ok:"Ignore"});
+      if (ok) decide(a.id, "reject");
+      return;
+    }
+    closeModal();
+    const label = {local:"Overwrite RomM with the local version?", romm:"Overwrite the local file with the RomM version?", both:"Keep both versions?"}[c];
+    const ok = await confirmBox({title: label, body:`<p style="margin:0;color:var(--muted)">${esc(a.game)} — <span style="font-family:var(--mono)">${esc(a.file_name)}</span></p>`, ok:"Yes, do it"});
+    if (ok) decide(a.id, c);
+  });
+}
+
+function openGame(g){
+  const files = (g.files||[]).map(f=>`<tr><td>${f.type}</td><td class="f">${esc(f.name)}</td><td><span class="status-badge st-${f.status==="local-only"||f.status==="romm-only"?"unmatched":f.status==="skipped"?"unmatched":f.status}">${esc(f.status)}</span></td></tr>`).join("");
+  const shot = img(g.screenshot), cover = img(g.cover);
+  openModal(`
+    <div class="mh">${cover?`<div style="width:64px;height:86px;border-radius:8px;flex:none;background:var(--surface-2) url('${cover}') center/cover"></div>`:""}
+      <div><h3>${esc(g.romm_name || g.name)}</h3><p>${esc(g.platform_display_name || g.platform)}${g.rom_id?` · RomM #${g.rom_id}`:""}</p>
+      <p style="font-family:var(--mono);font-size:12px">${esc(g.name)}</p></div><span class="spacer"></span><button class="iconbtn" onclick="closeModal()" aria-label="Close">✕</button></div>
+    <div class="mb">
+      ${shot?`<div style="aspect-ratio:4/3;max-height:300px;width:100%;border-radius:10px;background:#000 url('${shot}') center/contain no-repeat;image-rendering:pixelated;margin-bottom:12px"></div>`:""}
+      <div class="chips" style="margin:0 0 12px">
+        <span class="chip">Local saves <b>${g.local_saves}</b></span><span class="chip">Local states <b>${g.local_states}</b></span>
+        <span class="chip">RomM saves <b>${g.romm_saves}</b></span><span class="chip">RomM states <b>${g.romm_states}</b></span>
+        <span class="chip">RomM updated <b>${ago(g.romm_last_updated)}</b></span>
+      </div>
+      ${g.error?`<div class="notice bad">${esc(g.error)}</div>`:""}
+      ${!g.matched?`<div class="notice">This game wasn't found in RomM. Check the platform folder name in <code>platform_mapping.yaml</code> and that the ROM is in your RomM library.</div>`:""}
+      ${files?`<table class="files"><thead><tr><th>Type</th><th>File</th><th>Status</th></tr></thead><tbody>${files}</tbody></table>`:`<div class="empty">No file details yet.</div>`}
+    </div>`, true);
+}
+
+// ---------- render ----------
+function renderStatus(d){
+  const busy = ["building","fetching","syncing","applying","starting"].includes(d.phase);
+  $("#phase-label").textContent = PHASES[d.phase] || d.phase;
+  $("#phase-detail").textContent = d.phase_detail || "";
+  const p = d.progress || {}; const pct = p.total ? Math.round(100*p.current/p.total) : 0;
+  const bar = $("#bar");
+  bar.classList.toggle("indeterminate", busy && !(d.phase==="syncing" && p.total));
+  bar.querySelector("i").style.width = (busy ? pct : 100) + "%";
+  $("#progress-text").innerHTML = busy && p.total ? `<b>${p.current}</b> of <b>${p.total}</b> games` : (d.last_sync_finished ? `Finished ${ago(d.last_sync_finished)}` : "");
+  $("#current-game").textContent = busy && d.current_game ? d.current_game : "";
+  const r = d.last_sync_result || {};
+  const chips = [];
+  if (r.pushed!=null) {
+    chips.push(`<span class="chip info">⬆ <b>${r.pushed}</b> uploaded</span>`);
+    chips.push(`<span class="chip ok">⬇ <b>${r.pulled}</b> downloaded</span>`);
+    chips.push(`<span class="chip">✓ <b>${r.in_sync}</b> in sync</span>`);
+    if (r.errors) chips.push(`<span class="chip bad">✘ <b>${r.errors}</b> errors</span>`);
+    if (r.unmatched) chips.push(`<span class="chip">? <b>${r.unmatched}</b> unmatched</span>`);
+  }
+  const conflicts = d.pending.filter(a=>a.kind==="conflict").length, waiting = d.pending.length - conflicts;
+  if (waiting) chips.push(`<span class="chip warn">⏸ <b>${waiting}</b> awaiting approval</span>`);
+  if (conflicts) chips.push(`<span class="chip bad">⚠ <b>${conflicts}</b> conflict${conflicts>1?"s":""}</span>`);
+  $("#result-chips").innerHTML = chips.join("");
+
+  const notes = [];
+  if (d.last_error) notes.push(`<div class="notice bad">${esc(d.last_error)}</div>`);
+  if (d.config.pull_mode !== "off" && !d.config.pull_writable) notes.push(`<div class="notice">RomM → folder sync is enabled but your sync folders are mounted read-only. Remove <code>:ro</code> from the container's sync folder mappings to allow downloads.</div>`);
+  if (d.config.dry_run) notes.push(`<div class="notice">DRY_RUN is on: nothing is uploaded or downloaded.</div>`);
+  $("#notices").innerHTML = notes.join("");
+
+  $("#last-sync").textContent = ago(d.last_sync_finished);
+  $("#next-sync").textContent = d.next_sync_at ? ago(d.next_sync_at) : (d.config.sync_mode==="watch" && !d.config.poll_interval ? "off" : "—");
+  $("#push-mode").textContent = MODE[d.config.push_new_mode] || d.config.push_new_mode;
+  $("#pull-mode").textContent = (d.config.pull_mode!=="off" && !d.config.pull_writable) ? "Off (read-only mount)" : (MODE[d.config.pull_mode] || d.config.pull_mode);
+  $("#games-count").textContent = d.games.length;
+  $("#systems-count").textContent = d.systems.length;
+  $("#mode-pill").textContent = d.config.sync_mode === "watch" ? "watch mode" : "periodic mode";
+  $("#romm-url").textContent = d.config.romm_url ? "→ " + d.config.romm_url.replace(/^https?:\/\//,"") : "";
+  $("#romm-link").href = d.config.romm_url || "#";
+  const btn = $("#sync-btn"); btn.disabled = busy; btn.textContent = busy ? "⟳ Syncing…" : "⟳ Sync now";
+  const conn = $("#conn");
+  conn.innerHTML = `<span class="dot ${d.phase==="error"?"bad":busy?"busy":d.pending.length?"warn":"ok"}"></span><span>${d.phase==="error"?"error":busy?"working":"connected"}</span>`;
+}
+
+function renderApprovals(force=false){
+  const d = state.data; if(!d) return;
+  const list = d.pending;
+  $("#approvals-section").hidden = list.length === 0;
+  $("#pending-count").textContent = list.length;
+  if (!list.length) return;
+  const groups = {conflict:[], push:[], pull:[]};
+  list.forEach(a => groups[KIND[a.kind].tab].push(a));
+  if (!state.tab || !groups[state.tab].length) state.tab = groups.conflict.length ? "conflict" : groups.push.length ? "push" : "pull";
+  const h = hashOf([list, state.tab, [...state.busy]]);
+  if (!force && state.lastHash.ap === h) return; state.lastHash.ap = h;
+
+  const tabs = [["conflict","Conflicts","conf"],["push","Folder → RomM",""],["pull","RomM → Folder",""]]
+    .filter(([k])=>groups[k].length)
+    .map(([k,l,c])=>`<button class="tab ${c} ${state.tab===k?"active":""}" data-tab="${k}">${l}<span class="n">${groups[k].length}</span></button>`).join("");
+  $("#ap-tabs").innerHTML = tabs;
+  $("#ap-tabs").querySelectorAll(".tab").forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab; renderApprovals(true);});
+
+  const cur = groups[state.tab];
+  const head = {
+    conflict:`<span class="title">Changed in both places</span><span class="muted">Pick which version wins — or keep both. Nothing is overwritten until you choose.</span>`,
+    push:`<span class="title">New or changed in your sync folder</span><span class="muted">Approve to upload to RomM.</span><span class="spacer"></span>
+          <button class="btn small" id="rej-all">Skip all</button><button class="btn small primary" id="ok-all">Upload all ${cur.length}</button>`,
+    pull:`<span class="title">New or changed on RomM</span><span class="muted">Approve to write into your sync folder.</span><span class="spacer"></span>
+          <button class="btn small" id="rej-all">Skip all</button><button class="btn small primary" id="ok-all">Download all ${cur.length}</button>`,
+  }[state.tab];
+  $("#ap-head").innerHTML = head;
+  if ($("#ok-all")) $("#ok-all").onclick = () => approveAll(cur, state.tab==="push"?"Upload":"Download");
+  if ($("#rej-all")) $("#rej-all").onclick = async () => {
+    const ok = await confirmBox({title:`Skip ${cur.length} item(s)?`, body:`<p style="margin:0">They won't be synced, and you won't be asked again unless the files change.</p>`, ok:"Skip all"});
+    if (ok) bulk(cur.map(a=>a.id), "reject");
+  };
+
+  $("#ap-list").innerHTML = cur.map(a => {
+    const k = KIND[a.kind], th = actionThumb(a), busy = state.busy.has(a.id);
+    const meta = k.dir==="up" ? `${size(a.local_size)} · modified ${ago(a.local_mtime)}` : k.dir==="down" ? `${size(a.romm_size)} · RomM ${ago(a.romm_updated_at)}` : `local ${ago(a.local_mtime)} · RomM ${ago(a.romm_updated_at)}`;
+    return `<div class="ap-row">
+      <div class="thumb" ${th?`style="background-image:url('${th}')"`:""}></div>
+      <div style="min-width:0">
+        <div class="name"><span class="dir ${k.dir}">${a.kind.endsWith("_update")?k.label+" · overwrite":k.label}</span>${esc(a.game)} <span style="color:var(--muted);font-weight:400">· ${esc(a.platform)}</span></div>
+        <div class="file">${esc(a.file_name)} · ${meta}</div>
+        <div class="why">${esc(a.reason)}</div>
+      </div>
+      <div class="acts">${busy?`<span class="pill"><span class="dot busy"></span>working</span>`:
+        a.kind==="conflict" ? `<button class="btn small primary" data-resolve="${a.id}">Resolve…</button>`
+        : `<button class="btn small" data-rej="${a.id}">Skip</button><button class="btn small primary" data-ok="${a.id}">${k.label}</button>`}</div>
+    </div>`;
+  }).join("") || `<div class="empty">Nothing here.</div>`;
+  const byId = Object.fromEntries(cur.map(a=>[a.id,a]));
+  $("#ap-list").querySelectorAll("[data-ok]").forEach(b=>b.onclick=()=>approveOne(byId[b.dataset.ok]));
+  $("#ap-list").querySelectorAll("[data-rej]").forEach(b=>b.onclick=()=>decide(b.dataset.rej,"reject"));
+  $("#ap-list").querySelectorAll("[data-resolve]").forEach(b=>b.onclick=()=>openConflict(byId[b.dataset.resolve]));
+}
+
+function renderSystems(d){
+  const h = hashOf([d.systems, state.system]); if (state.lastHash.sys === h) return; state.lastHash.sys = h;
+  $("#sys-count").textContent = d.systems.length;
+  const slugFor = p => (d.games.find(g=>g.platform===p && g.platform_slug)||{}).platform_slug;
+  $("#systems").innerHTML = d.systems.map(s => {
+    const slug = slugFor(s.platform); const tot = s.games || 1;
+    const seg = (n,c)=> n?`<i class="${c}" style="width:${100*n/tot}%"></i>`:"";
+    const initials = esc(s.display_name.replace(/[^A-Za-z0-9 ]/g,"").split(/\s+/).map(w=>w[0]).join("").slice(0,3).toUpperCase());
+    return `<div class="card sys ${state.system===s.platform?"active":""}" data-p="${esc(s.platform)}">
+      <div class="top"><div class="icon">${slug?`<img src="img/platform/${encodeURIComponent(slug)}" alt="" onerror="this.replaceWith(document.createTextNode('${initials}'))">`:initials}</div>
+        <div style="min-width:0"><div class="nm">${esc(s.display_name)}</div><div class="sub">${plural(s.games,"game")} · ${plural(s.saves,"save")} · ${plural(s.states,"state")}</div></div></div>
+      <div class="seg">${seg(s.synced,"s-ok")}${seg(s.pending,"s-pend")}${seg(s.conflict,"s-conf")}${seg(s.error,"s-err")}${seg(s.unmatched,"s-un")}</div>
+      <div class="legend"><span>✓ ${s.synced}</span>${s.pending?`<span style="color:var(--warn)">⏸ ${s.pending}</span>`:""}${s.conflict?`<span style="color:var(--bad)">⚠ ${s.conflict}</span>`:""}${s.unmatched?`<span>? ${s.unmatched}</span>`:""}${s.error?`<span style="color:var(--bad)">✘ ${s.error}</span>`:""}</div>
+    </div>`;
+  }).join("") || `<div class="empty card" style="grid-column:1/-1">No systems yet — waiting for the first scan.</div>`;
+  $("#systems").querySelectorAll(".sys").forEach(c=>c.onclick=()=>{ state.system = state.system===c.dataset.p ? null : c.dataset.p; state.lastHash={}; render(); });
+}
+
+function renderGames(d){
+  let games = d.games;
+  if (state.system) games = games.filter(g=>g.platform===state.system);
+  if (state.filter==="attention") games = games.filter(g=>["pending","conflict","error"].includes(g.ui_status));
+  else if (state.filter==="synced") games = games.filter(g=>g.ui_status==="synced");
+  else if (state.filter==="unmatched") games = games.filter(g=>g.ui_status==="unmatched");
+  if (state.q) { const q = state.q.toLowerCase(); games = games.filter(g => (g.name+" "+(g.romm_name||"")).toLowerCase().includes(q)); }
+  const h = hashOf(games.map(g=>[g.platform,g.name,g.ui_status,g.screenshot,g.cover,g.local_saves,g.local_states,g.romm_saves,g.romm_states]));
+  $("#game-count").textContent = games.length + (games.length!==d.games.length?` / ${d.games.length}`:"");
+  if (state.lastHash.games === h) return; state.lastHash.games = h;
+  $("#games").innerHTML = games.map((g,i) => {
+    const shot = img(g.screenshot), cover = img(g.cover);
+    return `<div class="card game" data-i="${i}">
+      <div class="shot ${shot?"":"noimg"}" ${shot?`style="background-image:url('${shot}')"`:""}>${shot?"":"no screenshot"}
+        <span class="badge status-badge st-${g.ui_status}">${STATUS_LABEL[g.ui_status]||g.ui_status}</span>
+        ${cover?`<div class="cover" style="background-image:url('${cover}')"></div>`:""}</div>
+      <div class="body ${cover?"":"nocover"}"><div class="title">${esc(g.romm_name || g.name)}</div><div class="plat">${esc(g.platform_display_name || g.platform)}</div></div>
+      <div class="counts"><span title="saves (local / RomM)">💾 ${g.local_saves} / ${g.romm_saves}</span><span title="states (local / RomM)">⏱ ${g.local_states} / ${g.romm_states}</span><span class="spacer" style="flex:1"></span><span>${g.romm_last_updated?ago(g.romm_last_updated):""}</span></div>
+    </div>`;
+  }).join("") || `<div class="empty card" style="grid-column:1/-1">${d.games.length?"No games match these filters.":"No games found yet."}</div>`;
+  $("#games").querySelectorAll(".game").forEach(c=>c.onclick=()=>openGame(games[+c.dataset.i]));
+}
+
+function renderActivity(d){
+  const h = hashOf(d.activity.slice(-1)); if (state.lastHash.act === h) return; state.lastHash.act = h;
+  $("#act-count").textContent = d.activity.length ? `${d.activity.length} recent` : "";
+  const log = $("#log"); const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+  log.innerHTML = d.activity.map(a=>`<div class="l-${a.level}"><span>${new Date(a.t).toLocaleTimeString()}</span><span>${a.level}</span><span class="m">${esc(a.msg)}</span></div>`).join("");
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+function render(){ const d = state.data; if(!d) return; renderStatus(d); renderApprovals(); renderSystems(d); renderGames(d); renderActivity(d); }
+
+let timer = null, fails = 0;
+async function poll(){
+  clearTimeout(timer);
+  try {
+    state.data = await api("api/status"); fails = 0; render();
+  } catch(e) {
+    fails++; $("#conn").innerHTML = `<span class="dot bad"></span><span>offline</span>`;
+  }
+  const busy = state.data && ["building","fetching","syncing","applying","starting"].includes(state.data.phase);
+  timer = setTimeout(poll, busy ? 1000 : Math.min(2500 * (1 + fails), 15000));
+}
+
+$("#sync-btn").onclick = async () => { try { await api("api/sync",{method:"POST"}); toast("Sync started"); poll(); } catch(e){ toast("⚠ "+e.message); } };
+$("#q").oninput = e => { state.q = e.target.value; state.lastHash.games = null; render(); };
+$("#status-filter").querySelectorAll("button").forEach(b => b.onclick = () => {
+  $("#status-filter").querySelectorAll("button").forEach(x=>x.classList.toggle("on", x===b));
+  state.filter = b.dataset.f; state.lastHash.games = null; render();
+});
+setInterval(()=>{ if(state.data) renderStatus(state.data); }, 15000); // keep "x min ago" fresh
+poll();
+</script>
+</body>
+</html>
