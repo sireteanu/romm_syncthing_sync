@@ -161,7 +161,6 @@ class Config:
 
         # Validate platform mapping file (optional - will fallback to exact matching)
         if (self.PLATFORM_MAP_PATH is not None) and (not self.PLATFORM_MAP_PATH.exists()):
-            logger.warning(f"Platform mapping file not found: {self.PLATFORM_MAP_PATH}. Will use exact platform slug matching only.")
             self.PLATFORM_MAP_PATH = None  # this allows NO platform map path
         
         if errors:

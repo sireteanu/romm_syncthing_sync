@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.3.0 — mapping lives in the UI
+
+### Changed
+- The platform mapping is managed only on the Platforms page. On first start it's pre-filled with the original project's folder-name defaults (or a mapping you saved or mounted before), and no file needs to be mounted. The Unraid template and compose files no longer mount `platform_mapping.yaml`.
+- The interface no longer refers to `platform_mapping.yaml`. "Your mapping" is now labelled **Mapped**.
+
+### Fixed
+- The saved mapping no longer collides with a `platform_mapping.yaml` *folder* that Docker creates in the appdata folder when the mapped file is missing (it's now stored as `platform_mapping.ui.yaml`).
+- The "unsaved changes" bar no longer shows when there are no changes.
+- On first install, the first sync waits briefly for RomM's folder aliases so those folders match right away.
+
+### Added
+- The Platforms page and the startup log show what each sync folder contains, with a clear explanation when one is empty or missing system subfolders.
+
 ## 2.2.0 — faster library reads, progress logging
 
 ### Changed

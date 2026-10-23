@@ -113,14 +113,13 @@ This doesn't download ROMs or manage your library. For devices that can run a re
    - **Saves folder** / **States folder**: your Syncthing folders, e.g. `/mnt/user/syncthing/saves`
    - **App data**: `/mnt/user/appdata/romm-sync`
    - **RomM URL** and **RomM API token**
-3. *(Optional)* Download [`platform_mapping.yaml`](platform_mapping.yaml) into `/mnt/user/appdata/romm-sync/`. You can also skip it and map folders on the dashboard's **Platforms** page.
-4. **Apply**, then click the container icon → **WebUI**.
+3. **Apply**, then click the container icon → **WebUI**.
 
 If your saves and states live in **one** folder: switch to **Advanced View**, remove the States folder path and the `SAVE_SYNC_FOLDER` / `STATE_SYNC_FOLDER` variables, change the Saves folder's container path to `/syncdata`, and add a variable `ALL_SYNC_FOLDER` = `/syncdata`.
 
 ## Docker Compose
 
-Download `docker-compose.yml`, `.env.example` and `platform_mapping.yaml` to a folder, edit `.env.example` (see below), then:
+Download `docker-compose.yml` and `.env.example` to a folder, edit `.env.example` (see below), then:
 
 ```bash
 docker compose up -d
@@ -220,20 +219,14 @@ Each system folder in your sync folders (`snes`, `md`, `Nintendo 64`, …) has t
 
 Folders are resolved in this order, and most never need a mapping:
 
-1. **Your mapping**: chosen on the Platforms page (or in `platform_mapping.yaml`)
+1. **Mapped**: chosen on the Platforms page (pre-filled with common folder names)
 2. **Exact**: the folder name is a RomM platform slug (`snes`, `gba`, `n64`…)
 3. **RomM folder**: the folder has the same name as that platform's folder in *your* RomM library
 4. **RomM alias**: one of RomM's built-in folder aliases for Batocera / RetroBat / ES-DE names (`megadrive`, `amstradcpc`, `atarilynx`…)
 
 **Where the platform list comes from:** the full list of platforms RomM supports (459 at the time of writing) and RomM's folder aliases are downloaded from GitHub. Slugs and aliases come from [`rommapp/romm`](https://github.com/rommapp/romm), fetched at the tag that matches your RomM server's version when that tag exists, with display names from [`rommapp/docs`](https://github.com/rommapp/docs). The list is cached in `/data/romm_platforms.json` and refreshed weekly, or whenever you click **Update platform list from RomM GitHub**. If GitHub can't be reached, the cached list is used. In the picker, platforms that are already in your RomM library are listed first.
 
-**The mapping file:** saving on the Platforms page writes `/data/platform_mapping.yaml`. If you also mount a `platform_mapping.yaml` (the original setup), it's used until you first save in the UI. After that it's only the starting point and is never modified. The format is unchanged:
-```yaml
-genesis:        # RomM platform slug
-  - md          # your folder names (case-insensitive)
-  - megadrive
-```
-The bundled [`platform_mapping.yaml`](platform_mapping.yaml) (from the original project) covers common MinUI/NextUI and Knulli folder names. With the Platforms page it's optional.
+**Starting point:** on first start the mapping is pre-filled with the common MinUI/NextUI and Knulli folder names from the original project (for example `md` and `megadrive` → Sega Mega Drive/Genesis, `sfc` → SNES). After that you manage it only on the Platforms page. Remove an entry with ✕ to fall back to automatic matching. It's stored in `/data`, so it survives updates.
 
 See https://docs.romm.app/latest/Platforms-and-Players/Supported-Platforms/ for RomM's supported platforms.
 

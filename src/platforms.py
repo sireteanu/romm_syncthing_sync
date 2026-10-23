@@ -158,22 +158,87 @@ def ensure_catalog(romm_version: Optional[str] = None, force: bool = False) -> d
 
 # region mapping file
 def ui_mapping_file() -> Path:
+    # Deliberately NOT "platform_mapping.yaml": the Unraid template's default host path for the mounted
+    # mapping file is inside the appdata folder that is also /data. If that file was missing, Docker
+    # created a *folder* called platform_mapping.yaml there, which would collide with this file.
+    return data_dir() / "platform_mapping.ui.yaml"
+
+
+def legacy_ui_mapping_file() -> Path:
+    """Where 2.1.x saved the UI mapping."""
     return data_dir() / "platform_mapping.yaml"
 
 
-def effective_mapping_path(mounted: Optional[Path]) -> Optional[Path]:
-    """The UI-managed file wins once it exists; the mounted file is the starting point."""
-    ui = ui_mapping_file()
-    if ui.exists():
-        return ui
-    if mounted is not None and mounted.is_file():
-        return mounted
-    if mounted is not None and mounted.is_dir() and not getattr(effective_mapping_path, "_warned", False):
-        effective_mapping_path._warned = True
-        logger.warning(f"{mounted} is a folder, not a file. Docker creates an empty folder when the mapped "
-                       "file doesn't exist on the host. Either download platform_mapping.yaml to that host path "
-                       "(delete the folder first) or remove the mapping and use the dashboard's Platforms page.")
+def _warn_folder_once(path: Path):
+    key = str(path)
+    warned = getattr(_warn_folder_once, "seen", set())
+    if key in warned:
+        return
+    warned.add(key)
+    _warn_folder_once.seen = warned
+    logger.warning(f"{path} is a folder, not a file — Docker creates an empty folder when a mapped file doesn't "
+                   "exist on the host. It's ignored. You can delete it, and either put platform_mapping.yaml there "
+                   "or remove that path mapping and use the dashboard's Platforms page.")
+
+
+def default_mapping_file() -> Path:
+    """Folder-name defaults from the original project (MinUI/NextUI, Knulli…), shipped in the image."""
+    return Path(__file__).resolve().parent.parent / "platform_mapping.yaml"
+
+
+def effective_mapping_path(mounted: Optional[Path] = None) -> Optional[Path]:
+    """The saved mapping (edited on the Platforms page). Older locations are only read until it exists."""
+    for candidate in (ui_mapping_file(), legacy_ui_mapping_file(), mounted):
+        if candidate is None:
+            continue
+        if candidate.is_file():
+            return candidate
+        if candidate.is_dir():
+            _warn_folder_once(candidate)
     return None
+
+
+def ensure_mapping_seeded(mounted: Optional[Path] = None) -> None:
+    """Create the saved mapping on first start, pre-filled from (in order) a mapping saved by 2.1.x,
+    a mounted platform_mapping.yaml, or the defaults shipped with the app."""
+    if ui_mapping_file().is_file():
+        return
+    for source, label in ((legacy_ui_mapping_file(), "previously saved mapping"),
+                          (mounted, "mounted platform_mapping.yaml"),
+                          (default_mapping_file(), "built-in defaults")):
+        if source is not None and source.is_file():
+            try:
+                mapping = load_mapping(source)
+            except Exception as e:
+                logger.warning(f"Couldn't read {source} ({e}); trying the next source.")
+                continue
+            save_mapping(mapping)
+            logger.info(f"Platform mapping created from the {label} ({len(mapping)} platforms). "
+                        "Edit it on the dashboard's Platforms page.")
+            return
+    save_mapping({})
+
+
+def sync_folder_report(sync_dirs: List[Path]) -> List[dict]:
+    """What the app can see in each sync folder — for the Platforms page and the startup log."""
+    out = []
+    for d in sync_dirs:
+        if d is None:
+            continue
+        info = {"path": str(d), "exists": d.exists(), "folders": [], "files": 0, "hidden": []}
+        if d.exists():
+            try:
+                for p in sorted(d.iterdir(), key=lambda x: x.name.lower()):
+                    if p.name.startswith("."):
+                        info["hidden"].append(p.name)
+                    elif p.is_dir():
+                        info["folders"].append(p.name)
+                    else:
+                        info["files"] += 1
+            except PermissionError as e:
+                info["error"] = f"permission denied ({e})"
+        out.append(info)
+    return out
 
 
 def load_mapping(path: Optional[Path]) -> Dict[str, List[str]]:
@@ -189,11 +254,8 @@ def load_mapping(path: Optional[Path]) -> Dict[str, List[str]]:
     return out
 
 
-HEADER = """# Platform mapping for romm_sync — managed by the web UI (Platforms page).
-# <romm platform slug>:
-#   - <local folder name>
-# Folder names are matched case-insensitively. Folders that already match a RomM slug,
-# a folder name in your RomM library, or one of RomM's built-in aliases don't need an entry.
+HEADER = """# romm_sync platform mapping — edit this on the dashboard's Platforms page, not by hand.
+# <romm platform slug>: [<local folder name>, ...]   (folder names are case-insensitive)
 """
 
 

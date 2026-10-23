@@ -236,6 +236,7 @@ def create_app(cfg) -> FastAPI:
             "using_ui_file": path == pf.ui_mapping_file(),
             "mounted_file": str(cfg.PLATFORM_MAP_PATH) if cfg.PLATFORM_MAP_PATH else None,
             "mapping_error": mapping_error,
+            "sync_folders": pf.sync_folder_report(_sync_dirs()),
         }
 
     @app.get("/api/platforms")

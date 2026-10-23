@@ -24,6 +24,7 @@
   --accent:#6a48f5; --ok:#139a63; --warn:#b97a00; --bad:#d6283b; --info:#1f6fd1; --shadow:0 10px 40px rgba(20,24,40,.15);
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 button{font:inherit;color:inherit}
 a{color:var(--accent)}
@@ -325,7 +326,7 @@ html,body{overflow-x:hidden}
         <tbody id="pf-rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
       </table></div>
       <div class="legend-row">
-        <span><span class="how how-mapping">Your mapping</span> set here or in platform_mapping.yaml</span>
+        <span><span class="how how-mapping">Mapped</span> saved on this page (pre-filled with common MinUI / NextUI / Knulli folder names)</span>
         <span><span class="how how-exact">Exact</span> folder name is the RomM slug</span>
         <span><span class="how how-romm-folder">RomM folder</span> same folder name as in your RomM</span>
         <span><span class="how how-romm-alias">RomM alias</span> RomM's built-in alias (Batocera / ES-DE names)</span>
@@ -675,7 +676,7 @@ function renderActivity(d){
 function render(){ const d = state.data; if(!d) return; renderStatus(d); renderApprovals(); renderSystems(d); renderGames(d); renderActivity(d); }
 
 // ---------- platforms view ----------
-const HOW = {mapping:"Your mapping", exact:"Exact", "romm-folder":"RomM folder", "romm-alias":"RomM alias", none:"Not mapped"};
+const HOW = {mapping:"Mapped", exact:"Exact", "romm-folder":"RomM folder", "romm-alias":"RomM alias", none:"Not mapped"};
 const pf = { data:null, edits:{}, optionsFor:{} };
 function optLabel(p){ return `${p.name} (${p.slug})`; }
 function slugFromInput(v){
@@ -698,8 +699,21 @@ function renderPlatforms(){
     `<span class="chip ok">${lib} platform${lib===1?"":"s"} in your library</span>`,
   ].join("");
   const notes = [];
-  if (d.mapping_error) notes.push(`<div class="notice bad">Your mapping file couldn't be read (${esc(d.mapping_error)}). Saving here writes a fresh one.</div>`);
-  if (!d.using_ui_file && d.mapping_file) notes.push(`<div class="notice" style="background:var(--info-bg);color:var(--info)">Using the mounted <code>${esc(d.mapping_file)}</code>. When you save here, your mapping is written to <code>${esc(d.ui_mapping_file)}</code>, which is used from then on. The mounted file isn't modified.</div>`);
+  if (d.mapping_error) notes.push(`<div class="notice bad">Your saved mapping couldn't be read (${esc(d.mapping_error)}). Saving on this page replaces it.</div>`);
+  const sf = d.sync_folders || [];
+  const sfChips = sf.map(f => {
+    if (!f.exists) return `<span class="chip bad"><code>${esc(f.path)}</code> doesn't exist</span>`;
+    if (f.error) return `<span class="chip bad"><code>${esc(f.path)}</code>: ${esc(f.error)}</span>`;
+    const cls = f.folders.length ? "" : "warn";
+    return `<span class="chip ${cls}"><code>${esc(f.path)}</code>: ${plural(f.folders.length,"system folder")}${f.files?`, ${plural(f.files,"loose file")}`:""}</span>`;
+  }).join("");
+  if (sf.length) notes.push(`<div class="pf-meta" style="margin:0 0 10px">${sfChips}</div>`);
+  if (!d.folders.length) {
+    const loose = sf.some(f => f.files > 0);
+    notes.push(`<div class="notice">No system folders were found inside your sync folders. Saves need to be organised one folder per system, e.g. <code>${esc((sf[0]||{}).path||"/syncdata/saves")}/snes/Game.srm</code>.
+      ${loose ? "Files were found directly in the sync folder, without a system subfolder; those can't be matched to a platform." :
+        "The folder looks empty from inside the container, which usually means the host path mapped to it is wrong (Docker creates an empty folder when a host path doesn't exist). Check the <b>Saves folder</b> / <b>States folder</b> paths in the container settings."}</div>`);
+  }
   $("#pf-notices").innerHTML = notes.join("");
 
   $("#pf-options").innerHTML = d.platforms.map(p => `<option value="${esc(optLabel(p))}">${p.in_library?"★ in your RomM · "+p.rom_count+" ROMs":""}</option>`).join("");

@@ -35,8 +35,27 @@ def initialize_romm_sync():
     # RomM's platform list + folder aliases (from GitHub, cached in /data). In the background so a
     # server without internet access never delays startup.
     from src import platforms as platform_catalog
-    threading.Thread(target=lambda: platform_catalog.ensure_catalog(app_cfg.ROMM_CREDENTIALS.version()),
-                     name="platform-catalog", daemon=True).start()
+    catalog_thread = threading.Thread(target=lambda: platform_catalog.ensure_catalog(app_cfg.ROMM_CREDENTIALS.version()),
+                                      name="platform-catalog", daemon=True)
+    catalog_thread.start()
+    if not platform_catalog.get_catalog().get("platforms"):
+        # First run: give the download a moment so the first sync can already use RomM's folder aliases.
+        catalog_thread.join(timeout=30)
+
+    # Say what the sync folders look like from inside the container (most setup problems show up here).
+    for f in platform_catalog.sync_folder_report([app_cfg.SAVE_SYNC_DIR, app_cfg.STATE_SYNC_DIR, app_cfg.ALL_SYNC_DIR]):
+        if not f["exists"]:
+            logger.error(f"Sync folder {f['path']} doesn't exist inside the container.")
+        elif f.get("error"):
+            logger.error(f"Sync folder {f['path']}: {f['error']}")
+        elif not f["folders"]:
+            logger.warning(f"Sync folder {f['path']} has no system subfolders"
+                           + (f" ({f['files']} loose files)." if f["files"] else " — it's empty. Check the host path mapped to it."))
+        else:
+            shown = ", ".join(f["folders"][:12]) + (", …" if len(f["folders"]) > 12 else "")
+            logger.info(f"Sync folder {f['path']}: {len(f['folders'])} system folders ({shown})")
+    platform_catalog.effective_mapping_path(app_cfg.PLATFORM_MAP_PATH)  # warns about folder-instead-of-file mounts
+    platform_catalog.ensure_mapping_seeded(app_cfg.PLATFORM_MAP_PATH)
 
     romm = app_cfg.ROMM_CREDENTIALS
     logger.info(f"Connecting to RomM at {romm.url} (auth: {romm.auth_type})...")

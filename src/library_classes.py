@@ -43,7 +43,7 @@ class RetroGameServer:
             data = None
 
             if platform_map_path is None:
-                logger.debug("No platform mapping file; using automatic platform matching only.")
+                logger.debug("No saved platform mapping; using automatic platform matching only.")
                 return {}
 
             if platform_map_path is not None:
@@ -537,7 +537,7 @@ class LibraryScanner:
                     game.set_romm_data(matching_game_entry[0])
                 else:
                     # Game not found in ROMM library
-                    logger.warning(f"Could not match {game.name} with platform '{game.platform}' to ROMM server. Check your platform_mapping.yaml and verify that this game is on the ROMM server.")
+                    logger.warning(f"Could not match {game.name} with platform '{game.platform}' to ROMM server. Check this folder on the Platforms page and that the game is in your RomM library.")
                     game.is_matched = False
 
             else:

@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code (includes src/web_static for the GUI)
 COPY src/ ./src/
 RUN rm -rf ./src/experimental
-COPY romm_sync.py VERSION ./
+COPY romm_sync.py VERSION platform_mapping.yaml ./
 
 # Persistent data (sync history, pending approvals, backups). Map to appdata on Unraid.
 ENV DATA_DIR=/data \
