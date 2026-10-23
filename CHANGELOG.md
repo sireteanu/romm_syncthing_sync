@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.1 — startup fixes
+
+### Fixed
+- Startup no longer hangs silently when RomM can't be reached: requests to RomM now time out, the log and dashboard say *why* (unreachable URL, rejected token), and startup retries with backoff.
+- "Web UI ready" is only logged once the port is actually bound. A port clash is reported as an error instead.
+- Downloading the platform list from GitHub happens in the background and never delays startup on servers without internet access.
+
 ## 2.1.0 — Platforms page
 
 ### Added

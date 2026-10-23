@@ -32,7 +32,7 @@ class RommSaves:
             "rom_id": rom_id,
             "platform_id": platform_id
         }
-        response = requests.get(url, params=params, **self.romm_user._auth_kwargs())
+        response = requests.get(url, params=params, timeout=60, **self.romm_user._auth_kwargs())
         logger.debug(f"GET {url} - {response.status_code}")
         return response.json()
 
@@ -53,6 +53,7 @@ class RommSaves:
             url = f"{self.romm_user.url}/api/saves/"
             response = requests.post(
                 url,
+                timeout=300,
                 params=params,
                 files=files,
                 **self.romm_user._auth_kwargs()
@@ -85,6 +86,7 @@ class RommSaves:
             url = f"{self.romm_user.url}/api/saves/{id}"
             response = requests.put(
                 url,
+                timeout=300,
                 files=files,
                 **self.romm_user._auth_kwargs()
             )
@@ -115,7 +117,7 @@ class RommStates:
             "rom_id": rom_id,
             "platform_id": platform_id
         }
-        response = requests.get(url, params=params, **self.romm_user._auth_kwargs())
+        response = requests.get(url, params=params, timeout=60, **self.romm_user._auth_kwargs())
         logger.debug(f"GET {url} - {response.status_code}")
 
         return response.json()
@@ -149,6 +151,7 @@ class RommStates:
                 url = f"{self.romm_user.url}/api/states/"
                 response = requests.post(
                     url,
+                    timeout=300,
                     params={"rom_id": rom_id, 'emulator': emulator},
                     files=files,
                     **self.romm_user._auth_kwargs()
@@ -191,6 +194,7 @@ class RommStates:
                 url = f"{self.romm_user.url}/api/states/{id}"
                 response = requests.put(
                     url,
+                    timeout=300,
                     files=files,
                     **self.romm_user._auth_kwargs()
                 )
@@ -199,6 +203,10 @@ class RommStates:
             finally:
                 if screenshot_f:
                     screenshot_f.close()
+
+
+class RommUnreachable(RuntimeError):
+    """RomM could not be contacted (wrong URL, network, firewall, RomM down)."""
 
 
 class RommUser:
@@ -362,11 +370,19 @@ class RommUser:
             params = {"limit": limit, "offset": offset}
 
             url = f"{self.url}/api/roms/"
-            response = requests.get(
-                url,
-                params=params,
-                **self._auth_kwargs()
-            )
+            try:
+                response = requests.get(
+                    url,
+                    params=params,
+                    timeout=(10, 60),  # connect, read
+                    **self._auth_kwargs()
+                )
+            except requests.exceptions.RequestException as e:
+                raise RommUnreachable(f"Can't reach RomM at {self.url} ({type(e).__name__}: {e}). "
+                                      "Check ROMM_URL is reachable from inside this container.") from e
+            if response.status_code in (401, 403):
+                raise RuntimeError(f"RomM rejected the credentials ({response.status_code}). "
+                                   "Check ROMM_AUTH_TYPE / ROMM_API_TOKEN (needs roms + platforms read access).")
             logger.debug(f"GET {url} - {response.status_code} (offset: {offset}, limit: {limit})")
 
             if response.status_code == 400:

@@ -7,6 +7,8 @@ from watchdog.observers import Observer
 from typing import Callable
 import signal
 import sys
+import threading
+import time
 from dotenv import load_dotenv
 # logging special import
 from loguru import logger
@@ -30,14 +32,31 @@ def initialize_romm_sync():
         from src.web import start_web_server
         start_web_server(app_cfg)
 
-    # RomM's platform list + folder aliases (from GitHub, cached in /data) for automatic platform matching
+    # RomM's platform list + folder aliases (from GitHub, cached in /data). In the background so a
+    # server without internet access never delays startup.
     from src import platforms as platform_catalog
-    platform_catalog.ensure_catalog(app_cfg.ROMM_CREDENTIALS.version())
+    threading.Thread(target=lambda: platform_catalog.ensure_catalog(app_cfg.ROMM_CREDENTIALS.version()),
+                     name="platform-catalog", daemon=True).start()
 
-    # First sync. Compares all save states
-    logger.info("Building local and romm libraries. This may take a while for large libraries...")
-    STATE.set_phase("building", "Reading RomM library and sync folders")
-    srv, lcl = SyncOrchestrator.build_libraries(app_cfg=app_cfg)
+    romm = app_cfg.ROMM_CREDENTIALS
+    logger.info(f"Connecting to RomM at {romm.url} (auth: {romm.auth_type})...")
+    attempt = 0
+    while True:
+        try:
+            version = romm.version()
+            if version:
+                logger.info(f"Connected to RomM {version}.")
+            # First sync. Compares all save states
+            logger.info("Building local and romm libraries. This may take a while for large libraries...")
+            STATE.set_phase("building", "Reading RomM library and sync folders")
+            srv, lcl = SyncOrchestrator.build_libraries(app_cfg=app_cfg)
+            break
+        except Exception as e:
+            wait = min(300, 15 * 2 ** attempt)
+            attempt += 1
+            logger.error(f"Startup failed: {e} Retrying in {wait}s.")
+            STATE.sync_finished(error=f"{e} — retrying in {wait}s")
+            time.sleep(wait)
 
     orchestrator = SyncOrchestrator(local_library=lcl, romm_server=srv)
     if app_cfg.FULL_INITIAL_SYNC == "false":

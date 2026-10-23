@@ -15,6 +15,7 @@ import base64
 import mimetypes
 import secrets
 import threading
+import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -335,5 +336,15 @@ def start_web_server(cfg) -> Optional[threading.Thread]:
     server = uvicorn.Server(config)
     t = threading.Thread(target=server.run, name="web-ui", daemon=True)
     t.start()
-    logger.info(f"Web UI listening on port {cfg.WEB_PORT}")
+    # Only report success once the port is actually bound.
+    for _ in range(100):
+        if server.started:
+            logger.info(f"Web UI ready on port {cfg.WEB_PORT} (inside the container). "
+                        f"Open http://<server-ip>:<mapped port>/")
+            return t
+        if not t.is_alive():
+            break
+        time.sleep(0.1)
+    logger.error(f"Web UI failed to start on port {cfg.WEB_PORT} — is something else using that port? "
+                 "Sync keeps running without the UI.")
     return t
