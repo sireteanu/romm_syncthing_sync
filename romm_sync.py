@@ -1,6 +1,9 @@
+# romm_sync — sync emulator saves/states between a Syncthing folder and RomM.
+# Original project: https://github.com/amn-96/romm_syncthing_sync (c) amn-96, MIT License.
+# This fork adds a web GUI and two-way sync with approvals/conflict handling.
+
 # external library imports
 from watchdog.observers import Observer
-from pathlib import Path
 from typing import Callable
 import signal
 import sys
@@ -9,7 +12,9 @@ from dotenv import load_dotenv
 from loguru import logger
 # internal imports
 from src.config import get_config
-from src.sync_orchestrator import SyncOrchestrator, WatchdogSyncManager, PeriodicSyncManager, FileChangeHandler
+from src.sync_state import STATE, install_log_sink
+from src.sync_orchestrator import (SyncOrchestrator, WatchdogSyncManager, PeriodicSyncManager,
+                                   FileChangeHandler, RommPoller)
 
 # Load environment variables early
 load_dotenv()
@@ -18,20 +23,28 @@ load_dotenv()
 def initialize_romm_sync():
     # Get the app's configuration from docker env variables. See .env.example
     app_cfg = get_config()
+    install_log_sink()
+    STATE.sync_mode = app_cfg.SYNC_MODE
+
+    if app_cfg.WEB_UI:
+        from src.web import start_web_server
+        start_web_server(app_cfg)
 
     # First sync. Compares all save states
     logger.info("Building local and romm libraries. This may take a while for large libraries...")
+    STATE.set_phase("building", "Reading RomM library and sync folders")
     srv, lcl = SyncOrchestrator.build_libraries(app_cfg=app_cfg)
 
+    orchestrator = SyncOrchestrator(local_library=lcl, romm_server=srv)
     if app_cfg.FULL_INITIAL_SYNC == "false":
         logger.info("Initial sync skipped ('FULL_INITIAL_SYNC' = false).")
+        STATE.set_phase("idle", "Waiting for changes")
     else:
         logger.info("Performing initial sync.")
         force_sync: bool = app_cfg.FULL_INITIAL_SYNC == "force"
-        init_state = SyncOrchestrator(local_library=lcl, romm_server=srv)
-        init_state.full_sync(force_sync=force_sync)
+        orchestrator.full_sync(force_sync=force_sync)
 
-    return app_cfg, srv, lcl
+    return app_cfg, orchestrator.srv, orchestrator.lcl
 
 
 class AppExit():
@@ -47,7 +60,7 @@ class AppExit():
             logger.info(f"Received signal {signum}, shutting down gracefully...")
             stop_callback()
         return cls(handler)
-        
+
     @classmethod
     def watchdog(cls, sync_manager: WatchdogSyncManager, observer_stop_callback: Callable[[], None]):
         """Factory for watchdog sync mode exit handler"""
@@ -61,30 +74,36 @@ class AppExit():
 def run_periodic_sync(srv, lcl):
     """Run ROMM sync in periodic mode, performing full syncs at regular intervals."""
     sync_manager = PeriodicSyncManager(srv=srv, lcl=lcl)
+    STATE.request_sync_callback = sync_manager.trigger
 
     AppExit.periodic(sync_manager.stop)  # register the exit signal handler
 
     sync_manager.run()
 
 
-def run_watch_sync(srv, lcl):
+def run_watch_sync(srv, lcl, app_cfg):
     """Run ROMM sync in watch mode, syncing on file system changes.
-    For this mode, all the sync functions are called and written in the sync_orchestrator module."""
+    A background poller also re-checks RomM every ROMM_POLL_INTERVAL_SECONDS for changes made elsewhere."""
 
     # Create sync manager to control the watchdog sync
     sync_manager = WatchdogSyncManager(srv=srv, lcl=lcl)
+
+    poller = RommPoller(sync_manager.orchestrator, app_cfg.ROMM_POLL_INTERVAL_SECONDS)
+    STATE.request_sync_callback = poller.trigger
+    poller.start()
 
     # Create event handler with sync manager
     event_handler = FileChangeHandler(sync_manager)
     observer = Observer()
 
-    AppExit.watchdog(sync_manager=sync_manager, observer_stop_callback=observer.stop)  # register the exit signal handler
+    def stop_all():
+        poller.stop()
+        observer.stop()
 
-    # Determine which directories to watch
-    watch_dirs = lcl.sync_folders
+    AppExit.watchdog(sync_manager=sync_manager, observer_stop_callback=stop_all)  # register the exit signal handler
 
     # Schedule observer for each directory
-    for watch_dir in watch_dirs:
+    for watch_dir in lcl.sync_folders:
         observer.schedule(event_handler, str(watch_dir), recursive=True)
         logger.info(f"Watching directory: {watch_dir}")
 
@@ -110,7 +129,7 @@ def main():
     if app_cfg.SYNC_MODE == "periodic":
         run_periodic_sync(srv, lcl)
     elif app_cfg.SYNC_MODE == "watch":
-        run_watch_sync(srv, lcl)
+        run_watch_sync(srv, lcl, app_cfg)
     else:
         logger.critical(f"Invalid sync mode {app_cfg.SYNC_MODE}. Allowed: 'periodic', 'watch'.\n\nExiting...")
         sys.exit(1)

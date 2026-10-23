@@ -65,6 +65,8 @@ class Game:
     romm_platform_id: Optional[int] = None  # Platform ID (int) from RomM -- used for api lookups.
     romm_fs_size: Optional[float] = None  # File size in MB from RomM
 
+    romm_row: Optional[Dict] = None  # raw (trimmed) RomM library row
+
     # Match quality indicators
     is_matched: bool = False  # Whether this game was successfully matched to RomM
     match_confidence: float = 1.0  # 0.0-1.0 confidence score for fuzzy matching
@@ -120,6 +122,7 @@ class Game:
         self.romm_platform = romm_row['platform_slug']
         self.romm_platform_id = romm_row['platform_id']
         self.romm_fs_size = float(romm_row['fs_size_bytes']) / 2**20  # in MB
+        self.romm_row = romm_row  # kept for the GUI (cover / screenshots / display names)
         self.is_matched = True
 
     def fetch_romm_saves(self):

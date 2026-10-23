@@ -222,7 +222,7 @@ class RommUser:
         self.romm_base_dir = romm_base_dir
         self.romm_container_name = romm_container_name
         self.api_limit = api_limit
-        self.auth_type = auth_type
+        self.auth_type = auth_type.split("#")[0].strip().lower()  # tolerate "api  # comment" from .env files
         self.api_token = romm_api_token
         self._saves = None
         self._states = None
@@ -231,6 +231,78 @@ class RommUser:
         if self.auth_type == "api":
             return {"headers": {"Authorization": f"Bearer {self.api_token}"}}
         return {"auth": HTTPBasicAuth(self.user, self.password)}
+
+    # region Two-way sync helpers (romm_sync GUI fork)
+    def list_all(self, kind: str) -> List[Dict]:
+        """All saves or states owned by this user, in ONE request.
+        kind: 'saves' or 'states'. Works on RomM 4.5+ (rom_id is optional on these endpoints)."""
+        url = f"{self.url}/api/{kind}"
+        response = requests.get(url, timeout=60, **self._auth_kwargs())
+        logger.debug(f"GET {url} - {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        if isinstance(data, dict) and "items" in data:  # tolerate a paginated shape
+            data = data["items"]
+        return data if isinstance(data, list) else []
+
+    def download_asset(self, kind: str, item: Dict) -> bytes:
+        """Download a save/state's content.
+        RomM 5.x: GET /api/{kind}/{id}/content. Older RomM: fall back to the item's download_path."""
+        url = f"{self.url}/api/{kind}/{item['id']}/content"
+        response = requests.get(url, timeout=120, **self._auth_kwargs())
+        logger.debug(f"GET {url} - {response.status_code}")
+        if response.status_code in (404, 405) and item.get("download_path"):
+            url = self.absolute(item["download_path"])
+            response = requests.get(url, timeout=120, **self._auth_kwargs())
+            logger.debug(f"GET {url} - {response.status_code}")
+        response.raise_for_status()
+        return response.content
+
+    def upload(self, kind: str, local_path: Path, rom_id: int, romm_id: int | None = None,
+               screenshot: Path | None = None, upload_name: str | None = None) -> Dict:
+        """Create (romm_id=None) or replace (romm_id set) a save/state. Raises on HTTP errors.
+        upload_name lets us store the file under a different name (used for conflict copies)."""
+        field_name = "saveFile" if kind == "saves" else "stateFile"
+        name = upload_name or local_path.name
+        handles = []
+        try:
+            fh = open(local_path, "rb")
+            handles.append(fh)
+            files = {field_name: (name, fh)}
+            if screenshot and Path(screenshot).exists():
+                sh = open(screenshot, "rb")
+                handles.append(sh)
+                shot_name = f"{name}.png" if upload_name else Path(screenshot).name
+                files["screenshotFile"] = (shot_name, sh)
+            if romm_id is None:
+                url = f"{self.url}/api/{kind}"
+                response = requests.post(url, params={"rom_id": rom_id}, files=files, timeout=300, **self._auth_kwargs())
+            else:
+                url = f"{self.url}/api/{kind}/{romm_id}"
+                response = requests.put(url, files=files, timeout=300, **self._auth_kwargs())
+            logger.debug(f"{'POST' if romm_id is None else 'PUT'} {url} - {response.status_code}")
+            if response.status_code >= 400:
+                raise RuntimeError(f"RomM returned {response.status_code}: {response.text[:300]}")
+            return response.json()
+        finally:
+            for h in handles:
+                h.close()
+
+    def absolute(self, path: str) -> str:
+        """Turn a RomM-relative path (/assets/..., /api/raw/...) into a full URL."""
+        if path.startswith("http://") or path.startswith("https://"):
+            return path
+        return f"{self.url.rstrip('/')}/{path.lstrip('/')}"
+
+    def get_raw(self, path_or_url: str, timeout: int = 20) -> requests.Response:
+        """Authenticated GET of any RomM asset (covers, screenshots, platform icons) for the GUI image proxy."""
+        return requests.get(self.absolute(path_or_url), timeout=timeout, **self._auth_kwargs())
+
+    def heartbeat(self) -> Dict:
+        response = requests.get(f"{self.url}/api/heartbeat", timeout=10)
+        response.raise_for_status()
+        return response.json()
+    # endregion
 
     @property
     def saves(self) -> RommSaves:

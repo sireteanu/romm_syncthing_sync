@@ -14,6 +14,8 @@ from time import perf_counter as tpc
 from .games_class import Game
 from .library_classes import LocalLibrary, RetroGameServer, LibraryScanner
 from .config import get_config, METADATA_FILE_FILTERS
+from .sync_engine import SyncEngine, cleanup_backups
+from .sync_state import STATE
 from watchdog.events import FileSystemEventHandler
 
 
@@ -28,6 +30,7 @@ class SyncResult:
     unmatched_games: List[Game] = field(default_factory=list)
     success: bool = False
     error_message: Optional[str] = None
+    stats: dict = field(default_factory=dict)  # SyncEngine counters
 
     def summary(self) -> str:
         """Return a human-readable summary of sync results."""
@@ -124,132 +127,97 @@ class SyncOrchestrator:
         return matched, unmatched
 
     def full_sync(self, force_sync: bool = False) -> SyncResult:
-        """Perform a complete synchronization between local library and ROMM.
-        This is the main sync operation that:
-        1. Fetches current ROMM state for all matched games
-        2. Pushes local saves/states to ROMM
-        3. Caches the updated library state
-        Returns:
-            SyncResult with details of the operation
+        """Perform a complete two-way reconcile between the local library and RomM.
+        1. Rebuilds both libraries
+        2. Lets the SyncEngine compare every file (push / pull / queue for approval / conflict)
         """
-        logger.info("---------- Starting full sync ----------")
-        result = SyncResult()
+        with STATE.sync_lock:
+            logger.info("---------- Starting full sync ----------")
+            STATE.sync_started()
+            result = SyncResult()
+            try:
+                STATE.set_phase("building", "Reading RomM library and sync folders")
+                # Initialize a fresh state for the romm library and local library
+                self.srv, self.lcl = self.build_libraries(self.app_cfg)
 
-        # Initialize a fresh state for the romm library and local library
-        self.srv, self.lcl = self.build_libraries(self.app_cfg) 
+                games = list(self.lcl.games.values())
+                matched_games, unmatched_games = self._validate_games(games)
+                result.unmatched_games = unmatched_games
+                # games that disappeared from the folder disappear from the GUI too
+                STATE.replace_games([])
 
-        try:
-            matched_games, unmatched_games = self._validate_games(
-                list(self.lcl.games.values())
-            )
-            result.unmatched_games = unmatched_games
+                summary = SyncEngine().reconcile(games, srv=self.srv, discover_remote=True, force=force_sync)
+                result.games_synced = matched_games
+                result.success = summary["errors"] == 0
+                result.stats = summary
 
-            if not matched_games:
-                logger.debug("[FULLSYNC] No matched games found for syncing")
-                result.success = False
-                result.games_synced, result.games_failed = [], []
-                result.error_message = "No matched games found for syncing"
+                if result.unmatched_games:
+                    logger.info(f"[FULLSYNC] {len(result.unmatched_games)} games could not be matched to ROMM: "
+                                f"{', '.join([ug.name for ug in result.unmatched_games])}")
+                logger.info(f"[FULLSYNC] {self._fmt(summary)}")
+                logger.info("---------- Full sync completed ----------")
+                STATE.sync_finished(summary)
+                cleanup_backups()
                 return result
 
-            # Step 1: Fetch current ROMM state
-            logger.info(f"[FULLSYNC] Fetching ROMM data for {len(matched_games)} games")
-            self._fetch_romm_data(matched_games)
+            except Exception as e:
+                result.success = False
+                result.error_message = str(e)
+                logger.error(f"[FULLSYNC] Failed! {e}")
+                STATE.sync_finished(error=f"Full sync failed: {e}")
+                return result
 
-            # Step 2: Push local to ROMM
-            logger.info(f"[FULLSYNC] Syncing local data to ROMM for {len(matched_games)} games")
-            successful, failed = self._push_local_to_romm(matched_games, force=force_sync)
-
-            result.games_synced = successful
-            result.games_failed = failed
-
-            result.success = len(failed) == 0
-            
-            if len(successful) == 0 and len(failed) == 0:
-                logger.debug("[FULLSYNC] No changes detected - libraries already in sync")
-            
-            if not result.success:
-                logger.warning(f"[FULLSYNC] Encountered errors: {result.error_message}")
-            if result.games_failed:
-                logger.warning(f"[FULLSYNC] {len(result.games_failed)} games failed to sync")
-            if result.unmatched_games:
-                logger.info(f"[FULLSYNC] {len(result.unmatched_games)} games could not be matched to ROMM")
-                logger.info(f"[FULLSYNC] Unmatched games: {', '.join([ug.name for ug in result.unmatched_games])}")
-
-            logger.info("---------- Full sync completed ----------")
-
-            return result
-
-        except Exception as e:
-            result.success = False
-            result.error_message = str(e)
-            logger.error(f"[FULLSYNC] Failed! {e}", exc_info=True)
-            return result
+    @staticmethod
+    def _fmt(summary: dict) -> str:
+        return (f"uploaded {summary['pushed']}, downloaded {summary['pulled']}, "
+                f"awaiting approval {summary['queued']}, conflicts {summary['conflicts']}, "
+                f"in sync {summary['in_sync']}, errors {summary['errors']}")
 
     def watchdog_sync(self, event_paths: List[Path], event_types: List[str]) -> SyncResult:
-        """Perform an incremental sync of all file changes gathered by the watchdog.
+        """Incremental sync of the games touched by file system events."""
+        with STATE.sync_lock:
+            logger.info("---------- Starting watchdog sync ----------")
+            STATE.sync_started()
+            result = SyncResult()
+            try:
+                if not event_paths:
+                    logger.info("[WATCHDOGSYNC] No events to process")
+                    result.success = True
+                    STATE.sync_finished({})
+                    return result
 
-        This sync operation:
-        1. Extracts affected games from watchdog events
-        2. Rescans those games for updated files
-        3. Fetches their current ROMM state
-        4. Pushes local changes to ROMM
-        """
-        logger.info("---------- Starting watchdog sync ----------")
+                STATE.set_phase("building", "Refreshing RomM library")
+                # Refresh the romm library so that newly added games are not missed.
+                self.srv = RetroGameServer.build_romm_library(self.app_cfg.ROMM_CREDENTIALS)
 
-        # First, refresh the romm library.
-        logger.debug("[WATCHDOGSYNC] Updating state of Romm library.")
-        # updates the romm server object with a fresh, rebuilt instance. This is needed so that newly added games are not missed.
-        self.srv = RetroGameServer.build_romm_library(self.app_cfg.ROMM_CREDENTIALS)
+                for p, t in zip(event_paths, event_types):
+                    logger.debug(f"[WATCHDOGSYNC] --- File: {p}, Type: {t}")
 
-        result = SyncResult()
-        # next, partial sync of only modified files. 
-        # This saves a lot of time because building the local library requires api calls for every single game to fetch the saves and states.
-        try:
-            if not event_paths:
-                logger.info("[WATCHDOGSYNC] No events to process")
-                result.success = True
+                logger.info(f"[WATCHDOGSYNC] Processing {len(event_paths)} file change events...")
+                games_to_sync = self.lcl.update_from_watchdog_events(event_paths, self.srv)
+
+                if not games_to_sync:
+                    logger.info("[WATCHDOGSYNC] No games in ROMM library found matching local library. Will not sync.")
+                    result.error_message = "No matched games found for syncing"
+                    STATE.sync_finished({})
+                    return result
+
+                summary = SyncEngine().reconcile(games_to_sync, srv=self.srv, discover_remote=False,
+                                                 force=self.app_cfg.FORCE_PUSH_SYNC)
+                result.games_synced = games_to_sync
+                result.success = summary["errors"] == 0
+                result.stats = summary
+                logger.info(f"[WATCHDOGSYNC] {self._fmt(summary)}")
+                logger.info("---------- Watchdog sync completed ----------")
+                STATE.sync_finished(summary)
                 return result
 
-            logger.debug("[WATCHDOGSYNC] The following file events will be processed in this sync operation:")
-            for p, t in zip(event_paths, event_types):
-                logger.debug(f"[WATCHDOGSYNC] --- File: {p}, Type: {t}")
-            
-            # Extract the games using the file paths recorded by watchdog
-            logger.info(f"[WATCHDOGSYNC] Processing {len(event_paths)} file change events...")
-            games_to_sync = self.lcl.update_from_watchdog_events(
-                event_paths,
-                self.srv
-            )
-
-            if not games_to_sync:
-                logger.info("[WATCHDOGSYNC] No games in ROMM library found matching local library. Will not sync.")
+            except Exception as e:
                 result.success = False
-                result.games_synced, result.games_failed = [], []
-                result.error_message = "No matched games found for syncing"
+                result.error_message = str(e)
+                logger.error(f"[WATCHDOGSYNC] Failed! {e}")
+                STATE.sync_finished(error=f"Watch sync failed: {e}")
                 return result
-
-            logger.info(f"[WATCHDOGSYNC] Syncing save data for {len(games_to_sync)} games...")
-
-            # Fetch current ROMM state
-            self._fetch_romm_data(games_to_sync)
-
-            # Step 3: Push local to ROMM
-            successful, failed = self._push_local_to_romm(games_to_sync, force=self.app_cfg.FORCE_PUSH_SYNC)
-
-            result.games_synced = successful
-            result.games_failed = failed
-
-            result.success = len(failed) == 0
-            
-            logger.info("---------- Watchdog sync completed ----------")
-
-            return result
-
-        except Exception as e:
-            result.success = False
-            result.error_message = str(e)
-            logger.error(f"[WATCHDOGSYNC] Failed! {e}", exc_info=True)
-            return result
 
 
 class WatchdogSyncManager:
@@ -324,6 +292,11 @@ class WatchdogSyncManager:
             logger.info("---------- Continuing to watch for file changes ----------")
             with self.timer_lock:
                 self.is_syncing = False
+            # Events that arrived while we were syncing were queued but not scheduled.
+            with self.event_lock:
+                leftover = bool(self.pending_events)
+            if leftover:
+                self.schedule_sync()
 
     def cancel_pending(self):
         """Cancel any pending timer."""
@@ -340,6 +313,11 @@ class PeriodicSyncManager:
         self.sync_interval = get_config().SYNC_INTERVAL_SECONDS
         self.force_sync = get_config().FORCE_PUSH_SYNC
         self.stop_event = threading.Event()
+        self.wake_event = threading.Event()
+
+    def trigger(self):
+        """Run a sync now (GUI button)."""
+        self.wake_event.set()
 
     def run(self):
         """Run the periodic sync loop. Blocks until stop() is called."""
@@ -353,13 +331,57 @@ class PeriodicSyncManager:
                 except Exception as e:
                     logger.error(f"Sync failed: {e}")
 
-                self.stop_event.wait(timeout=int(self.sync_interval))
+                STATE.next_sync_at = _in_seconds(int(self.sync_interval))
+                self.wake_event.wait(timeout=int(self.sync_interval))
+                self.wake_event.clear()
         finally:
             logger.info("Exiting ('Periodic' sync mode)...")
 
     def stop(self):
         """Signal the sync loop to stop."""
         self.stop_event.set()
+        self.wake_event.set()
+
+
+def _in_seconds(sec: int) -> str:
+    from datetime import datetime, timezone, timedelta
+    return (datetime.now(timezone.utc) + timedelta(seconds=sec)).isoformat()
+
+
+class RommPoller:
+    """Watch mode only reacts to local file events. This thread runs a full reconcile every
+    ROMM_POLL_INTERVAL_SECONDS so changes made on RomM (other devices, the web player, Grout...)
+    are noticed, and handles 'Sync now' requests from the GUI."""
+
+    def __init__(self, orchestrator: 'SyncOrchestrator', interval: int):
+        self.orchestrator = orchestrator
+        self.interval = max(int(interval), 0)
+        self.wake_event = threading.Event()
+        self.stop_event = threading.Event()
+        self.thread = threading.Thread(target=self._run, name="romm-poller", daemon=True)
+
+    def start(self):
+        self.thread.start()
+
+    def trigger(self):
+        self.wake_event.set()
+
+    def stop(self):
+        self.stop_event.set()
+        self.wake_event.set()
+
+    def _run(self):
+        while not self.stop_event.is_set():
+            wait = self.interval if self.interval > 0 else None
+            STATE.next_sync_at = _in_seconds(self.interval) if self.interval > 0 else None
+            self.wake_event.wait(timeout=wait)
+            self.wake_event.clear()
+            if self.stop_event.is_set():
+                break
+            try:
+                self.orchestrator.full_sync(force_sync=False)
+            except Exception as e:
+                logger.error(f"RomM poll failed: {e}")
 
 
 class FileChangeHandler(FileSystemEventHandler):
@@ -371,14 +393,16 @@ class FileChangeHandler(FileSystemEventHandler):
     def _handle_event(self, event):
         """Common handler for all filesystem events."""
         if not event.is_directory:
-            event_path = Path(event.src_path)
+            # For renames use the destination: Syncthing (and our own downloads) write a temp file and
+            # rename it into place, and the temp name is filtered out as metadata.
+            event_path = Path(getattr(event, "dest_path", "") or event.src_path)
             # Filter out any metadata files
             if any(filter_str in event_path.name for filter_str in METADATA_FILE_FILTERS):
                 logger.trace(f"Ignored file system event (METADATA): {event.event_type} - {event.src_path}")
                 return
 
-            logger.trace(f"Filesystem Event: {event.event_type} - {event.src_path}")
-            self.sync_manager.add_event(event.src_path, event.event_type)
+            logger.trace(f"Filesystem Event: {event.event_type} - {event_path}")
+            self.sync_manager.add_event(str(event_path), event.event_type)
             self.sync_manager.schedule_sync()
 
     def on_modified(self, event):

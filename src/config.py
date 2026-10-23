@@ -21,6 +21,7 @@ METADATA_FILE_FILTERS = [
     ".DS_Store",
     "._",
     "~",
+    ".romm_sync.tmp",  # partial downloads written by the RomM -> folder sync
 ]
 
 
@@ -44,7 +45,16 @@ class Config:
                  platform_map: Path | None = Path("/config/platform_mapping.yaml") if os.getenv("PLATFORM_MAP_FILE") else None,
                  log_level: str = os.getenv("LOG_LEVEL", "INFO"),
                  dry_run: bool = os.getenv("DRY_RUN", "false").lower() == "true",
-                 enable_metrics: bool = os.getenv("ENABLE_METRICS", "false").lower() == "true"):
+                 enable_metrics: bool = os.getenv("ENABLE_METRICS", "false").lower() == "true",
+                 push_new_mode: str = os.getenv("PUSH_NEW_MODE", "confirm").lower(),
+                 pull_mode: str = os.getenv("PULL_MODE", "confirm").lower(),
+                 romm_poll_interval_seconds: int = int(os.getenv("ROMM_POLL_INTERVAL_SECONDS", "600")),
+                 web_ui: bool = os.getenv("WEB_UI", "true").lower() == "true",
+                 web_port: int = int(os.getenv("WEB_PORT", "8080")),
+                 web_username: str = os.getenv("WEB_USERNAME", ""),
+                 web_password: str = os.getenv("WEB_PASSWORD", ""),
+                 puid: str = os.getenv("PUID", ""),
+                 pgid: str = os.getenv("PGID", "")):
         """Initialize config from environment variables."""
 
         # ROMM API Configuration
@@ -71,6 +81,37 @@ class Config:
         # Feature Flags -- not implemented yet/may not be. Just leaving these here.
         self.DRY_RUN = dry_run
         self.ENABLE_METRICS = enable_metrics
+
+        # Two-way sync / approval settings
+        # PUSH_NEW_MODE: what to do with a local save/state that RomM has never seen.
+        #   confirm (default) -> queue it in the GUI for approval; auto -> upload right away (old behaviour)
+        self.PUSH_NEW_MODE: str = push_new_mode if push_new_mode in ("confirm", "auto") else "confirm"
+        # PULL_MODE: RomM -> sync folder ("reverse sync").
+        #   off -> never write to the sync folder; confirm (default) -> queue in GUI; auto -> download right away
+        self.PULL_MODE: str = pull_mode if pull_mode in ("off", "confirm", "auto") else "confirm"
+        # Watch mode only sees local file events, so RomM-side changes are found by polling.
+        self.ROMM_POLL_INTERVAL_SECONDS: int = romm_poll_interval_seconds
+
+        # Web GUI
+        self.WEB_UI: bool = web_ui
+        self.WEB_PORT: int = web_port
+        self.WEB_USERNAME: str = web_username
+        self.WEB_PASSWORD: str = web_password
+
+        # File ownership for files written into the sync folders (Unraid: nobody/users = 99/100)
+        self.PUID: int | None = int(puid) if str(puid).strip().isdigit() else None
+        self.PGID: int | None = int(pgid) if str(pgid).strip().isdigit() else None
+
+    def sync_dir_for(self, file_type: str) -> Path | None:
+        """Root sync folder that holds files of this type ('save' or 'state')."""
+        if self.ALL_SYNC_DIR is not None:
+            return self.ALL_SYNC_DIR
+        return self.SAVE_SYNC_DIR if file_type == "save" else self.STATE_SYNC_DIR
+
+    def pull_writable(self) -> bool:
+        """True when the sync folders can be written to (mounted rw)."""
+        dirs = [d for d in (self.SAVE_SYNC_DIR, self.STATE_SYNC_DIR, self.ALL_SYNC_DIR) if d is not None]
+        return bool(dirs) and all(os.access(d, os.W_OK) for d in dirs)
 
     def _validate_input_directories(self):
         """Validate that local library directories are configured correctly and exist within the container."""
@@ -107,10 +148,14 @@ class Config:
 
         if not self.ROMM_CREDENTIALS.url:
             errors.append("ROMM Host URL is required!")
-        if not self.ROMM_CREDENTIALS.password:
-            errors.append("ROMM_PASSWORD is required!")
-        if not self.ROMM_CREDENTIALS.user:
-            errors.append("ROMM_USERNAME is required!")
+        if self.ROMM_CREDENTIALS.auth_type == "api":
+            if not self.ROMM_CREDENTIALS.api_token:
+                errors.append("ROMM_API_TOKEN is required when ROMM_AUTH_TYPE=api!")
+        else:
+            if not self.ROMM_CREDENTIALS.password:
+                errors.append("ROMM_PASSWORD is required!")
+            if not self.ROMM_CREDENTIALS.user:
+                errors.append("ROMM_USERNAME is required!")
 
         errors += self._validate_input_directories()
 

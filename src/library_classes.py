@@ -73,6 +73,11 @@ class RetroGameServer:
         finally:
             return platform_map
 
+    def local_folder_matches_slug(self, folder_name: str, romm_slug: str) -> bool:
+        """True if a local platform folder maps to this RomM platform slug (via platform map or exact name)."""
+        mapped = self.get_romm_platform(folder_name)
+        return (mapped or folder_name) == romm_slug
+
     def get_romm_platform(self, local_platform_name: str) -> str | None:
         """Get the ROMM platform slug for a local platform folder name.
 
@@ -104,7 +109,14 @@ class RetroGameServer:
             'platform_id': int,
             'fs_name': str,
             'fs_size_bytes': int,
-            'platform_display_name': str
+            'platform_display_name': str,
+            # used by the web GUI / pull sync
+            'fs_name_no_ext': str,
+            'platform_fs_slug': str,
+            'path_cover_small': str,
+            'path_cover_large': str,
+            'url_cover': str,
+            'merged_screenshots': list,
         }
 
         # Strip all fields except essential ones
