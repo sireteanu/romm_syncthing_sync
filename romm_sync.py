@@ -26,6 +26,10 @@ def initialize_romm_sync():
     # Get the app's configuration from docker env variables. See .env.example
     app_cfg = get_config()
     install_log_sink()
+    from src import settings as dashboard_settings
+    dashboard_settings.apply_to_config(app_cfg)  # values saved on the Settings page override the container
+    from src import notify
+    notify.seed_from_state()
     from src.version import get_version
     logger.info(f"romm_sync v{get_version()} — https://github.com/sireteanu/romm_syncthing_sync")
     STATE.sync_mode = app_cfg.SYNC_MODE

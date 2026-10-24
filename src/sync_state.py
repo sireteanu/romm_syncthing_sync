@@ -220,6 +220,11 @@ class AppState:
             self.phase = "error" if error else "idle"
             self.phase_detail = error or ""
             self.current_game = None
+        try:
+            from . import notify  # late import: notify imports this module
+            notify.after_sync(result, error)
+        except Exception as e:
+            logger.debug(f"Notification step failed: {e}")
 
     def add_activity(self, level: str, message: str):
         with self.lock:
@@ -281,13 +286,19 @@ class AppState:
         self.save()
 
     def record_error(self, action: "PendingAction", message: str, detail: str = ""):
+        self.record_issue(action.key, action.game, action.platform, action.file_name, action.file_type,
+                          action.kind, message, detail)
+
+    def record_issue(self, key: str, game: str, platform: str, file_name: str, file_type: str,
+                     kind: str, message: str, detail: str = ""):
         with self.lock:
-            prev = self.errors.get(action.key, {})
-            self.errors[action.key] = {
-                "key": action.key, "game": action.game, "platform": action.platform,
-                "file_name": action.file_name, "file_type": action.file_type, "kind": action.kind,
+            prev = self.errors.get(key, {})
+            self.errors[key] = {
+                "key": key, "game": game, "platform": platform,
+                "file_name": file_name, "file_type": file_type, "kind": kind,
                 "message": message, "detail": detail if detail != message else "",
-                "at": utcnow_iso(), "count": prev.get("count", 0) + 1,
+                "at": prev.get("at") if prev.get("message") == message else utcnow_iso(),
+                "count": prev.get("count", 0) + 1,
             }
 
     def clear_error(self, key: str):

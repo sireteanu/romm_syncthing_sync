@@ -18,7 +18,7 @@ import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
@@ -72,24 +72,24 @@ def create_app(cfg) -> FastAPI:
     cache = _ImageCache()
 
     # region optional basic auth
-    if cfg.WEB_USERNAME and cfg.WEB_PASSWORD:
-        expected = (cfg.WEB_USERNAME, cfg.WEB_PASSWORD)
-
-        @app.middleware("http")
-        async def basic_auth(request: Request, call_next):
-            if request.url.path == "/api/health":
-                return await call_next(request)
-            header = request.headers.get("authorization", "")
-            ok = False
-            if header.lower().startswith("basic "):
-                try:
-                    user, _, pwd = base64.b64decode(header[6:]).decode().partition(":")
-                    ok = secrets.compare_digest(user, expected[0]) and secrets.compare_digest(pwd, expected[1])
-                except Exception:
-                    ok = False
-            if not ok:
-                return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="romm_sync"'})
+    # Optional basic auth. Credentials are read on every request so a change on the Settings page applies
+    # immediately (and clearing them turns auth off).
+    @app.middleware("http")
+    async def basic_auth(request: Request, call_next):
+        user_cfg, pwd_cfg = cfg.WEB_USERNAME, cfg.WEB_PASSWORD
+        if not (user_cfg and pwd_cfg) or request.url.path == "/api/health":
             return await call_next(request)
+        header = request.headers.get("authorization", "")
+        ok = False
+        if header.lower().startswith("basic "):
+            try:
+                user, _, pwd = base64.b64decode(header[6:]).decode().partition(":")
+                ok = secrets.compare_digest(user, user_cfg) and secrets.compare_digest(pwd, pwd_cfg)
+            except Exception:
+                ok = False
+        if not ok:
+            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="romm_sync"'})
+        return await call_next(request)
     # endregion
 
     @app.get("/", response_class=HTMLResponse)
@@ -289,6 +289,55 @@ def create_app(cfg) -> FastAPI:
         if STATE.request_sync_callback:
             STATE.request_sync_callback()
         return _platforms_payload()
+    # endregion
+
+    # region settings & notifications
+    from . import settings as st
+    from . import notify
+
+    def _settings_payload():
+        return {
+            **st.describe(cfg),
+            "notifications": st.notify_public(),
+            "connection": {
+                "romm_url": romm.url, "auth_type": romm.auth_type, "sync_mode": cfg.SYNC_MODE,
+                "sync_folders": [str(d) for d in _sync_dirs()],
+                "pull_writable": cfg.pull_writable(),
+            },
+        }
+
+    @app.get("/api/settings")
+    def settings_get():
+        return _settings_payload()
+
+    @app.put("/api/settings")
+    def settings_put(body: Dict[str, Any]):
+        try:
+            st.update(cfg, body.get("values", {}), body.get("reset", []))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        STATE.add_activity("INFO", "Settings updated from the dashboard")
+        return _settings_payload()
+
+    @app.put("/api/notifications")
+    def notifications_put(body: Dict[str, Any]):
+        try:
+            st.notify_update(body)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        STATE.add_activity("INFO", "Notification settings updated")
+        return _settings_payload()
+
+    @app.post("/api/notifications/test")
+    def notifications_test():
+        chans = st.notify_config()["channels"]
+        if not chans:
+            raise HTTPException(400, "Add and save a notification service first.")
+        failures = notify.send("romm_sync test notification",
+                               "If you can read this, notifications from romm_sync are working.", "normal", chans)
+        if failures:
+            raise HTTPException(502, "; ".join(f"{label}: {err}" for label, err in failures))
+        return {"ok": True, "sent": len(chans)}
     # endregion
 
     # region images

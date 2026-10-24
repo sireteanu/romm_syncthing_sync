@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.5.0 — settings, notifications, speed, matching, RomM look
+
+### Added
+- **Settings page**: sync behaviour, RomM check interval, file-change delay, periodic interval, backup retention and dashboard login, all editable in the browser and applied immediately. Stored in `/data/settings.json`, overriding container values, each with a reset link.
+- **Notifications** via Discord, ntfy, Gotify, Pushbullet or a generic webhook:
+  - per-event toggles (questions, errors, sync problems/recovery, sync activity)
+  - one message per sync, never repeated for the same item
+  - optional dashboard link
+  - a **Send test** button
+
+### Changed
+- **The dashboard follows RomM 5.x's design tokens.** That covers colours (dark `#07070f` / violet `#8b74e8`, light `#f5f5fa` / `#553e98`), RomM's font stack and sizes, glass cards, chip and card radii, the pill navigation, uppercase section labels and the scrollbar. The logo stays this app's own, and the footer states it isn't affiliated with RomM.
+- **Faster:**
+  - File fingerprints are cached across restarts.
+  - The RomM library is reused between syncs. Each sync makes one request to compare per-platform ROM counts and fetches only ROMs changed since the last read (RomM 5.x `updated_after`). A full re-read happens when counts change, when your folders/platforms change, or every 6 hours.
+  - Watch mode no longer re-reads the library on every file change.
+- "Could not match" warnings appear once per game instead of on every sync.
+
+### Fixed
+- The same game in two system folders (e.g. `gb/` and `gbc/`) was merged into one game and synced to only one RomM ROM. Games are now kept apart per system folder.
+- When two folders point at the same RomM platform and hold the same game, one copy is synced and the other is reported under Errors, instead of both writing to one RomM file.
+- Saves are matched to ROMs by exact name first. A partial match must be at the start of the ROM name and end at a word boundary, so "Mario" no longer matches "Super Mario World".
+- Watch mode read "Dr. Mario (USA).srm" as a game called "Dr". Names with dots now work.
+- Image, text and other non-save files in system folders are no longer treated as saves.
+
 ## 2.4.0 — automatic by default, asks only when unclear
 
 ### Changed

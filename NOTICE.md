@@ -19,12 +19,16 @@ Modifications by [sireteanu](https://github.com/sireteanu), also under the MIT L
 | New config options, API-token validation fix | `src/config.py`, `src/romm_api_func.py`, `.env.example` |
 | Unraid template, Docker/compose updates, auto-release workflow | `unraid/`, `Dockerfile`, `docker-compose.yml`, `.github/workflows/release.yml` |
 | Platform catalog from RomM's GitHub, Platforms page, automatic platform resolution | `src/platforms.py`, `src/library_classes.py` |
+| Settings page, notifications (Discord, ntfy, Gotify, Pushbullet, webhook) | `src/settings.py`, `src/notify.py` |
+| Version display and update check | `src/version.py` |
 | Tests, mock RomM server and demo data | `tests/` |
 
 Lines changed in files that came from the original project are listed in the git history
 (`git log` from commit `1d08deb`, the last upstream commit this fork is based on).
 
 ## Third-party
+
+- The dashboard's colours, font stack, sizes and corner radii follow RomM's published design tokens (`frontend/src/v2/styles/tokens.css` in `rommapp/romm`) so it looks at home next to RomM. RomM's logo and artwork are **not** used, and this project is not made by, affiliated with, or endorsed by the RomM project, in line with RomM's [brand guidelines](https://docs.romm.app/latest/About/Brand-Guidelines/).
 
 - [RomM](https://github.com/rommapp/romm) — this tool talks to RomM's API and, at runtime, downloads RomM's public platform list and folder aliases from the `rommapp/romm` and `rommapp/docs` GitHub repositories. It doesn't bundle any RomM code.
 - Python packages listed in `requirements.txt` (requests, watchdog, loguru, PyYAML, python-dotenv, FastAPI, Uvicorn), each under its own license.

@@ -52,15 +52,57 @@ def md5_file(path: Path) -> str:
 
 
 _hash_cache: Dict[str, Tuple[float, int, str]] = {}
+_hash_cache_loaded = False
+_hash_cache_dirty = False
+
+
+def _hash_cache_file() -> Path:
+    return data_dir() / "hash_cache.json"
+
+
+def _load_hash_cache():
+    global _hash_cache_loaded
+    if _hash_cache_loaded:
+        return
+    _hash_cache_loaded = True
+    try:
+        import json
+        raw = json.loads(_hash_cache_file().read_text())
+        _hash_cache.update({k: tuple(v) for k, v in raw.items()})
+        logger.debug(f"Loaded {len(_hash_cache)} cached file fingerprints")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.debug(f"Ignoring unreadable hash cache: {e}")
+
+
+def save_hash_cache():
+    """Persist fingerprints so a restart doesn't re-read every save (dropping files that no longer exist)."""
+    global _hash_cache_dirty
+    if not _hash_cache_dirty:
+        return
+    import json
+    for k in [k for k in _hash_cache if not os.path.exists(k)]:
+        del _hash_cache[k]
+    tmp = _hash_cache_file().with_suffix(".tmp")
+    try:
+        tmp.write_text(json.dumps(_hash_cache))
+        os.replace(tmp, _hash_cache_file())
+        _hash_cache_dirty = False
+    except OSError as e:
+        logger.debug(f"Couldn't save hash cache: {e}")
 
 
 def cached_md5(path: Path) -> str:
+    global _hash_cache_dirty
+    _load_hash_cache()
     st = path.stat()
     c = _hash_cache.get(str(path))
     if c and c[0] == st.st_mtime and c[1] == st.st_size:
         return c[2]
     h = md5_file(path)
     _hash_cache[str(path)] = (st.st_mtime, st.st_size, h)
+    _hash_cache_dirty = True
     return h
 
 
@@ -243,6 +285,11 @@ class SyncEngine:
         for g in unmatched:
             STATE.update_game(self.snapshot(g, {}, {}, error=None))
 
+        self._claimed: Dict[str, str] = {}  # file key -> "platform folder" that owns it in this run
+        if discover_remote:  # full sync: duplicate warnings are re-detected from scratch
+            with STATE.lock:
+                for k in [k for k in STATE.errors if k.startswith("dup:")]:
+                    del STATE.errors[k]
         STATE.set_phase("syncing", f"Comparing {len(matched)} games", total=len(matched))
         report = ProgressReporter("syncing", "Comparing local and RomM files")
         seen_rom_ids = set()
@@ -262,6 +309,7 @@ class SyncEngine:
             self._discover_remote_only(remote, seen_rom_ids, srv, pull_mode, summary)
 
         STATE.save()
+        save_hash_cache()
         return summary
 
     def _reconcile_game(self, game: Game, remote, pull_mode, force, summary):
@@ -277,6 +325,21 @@ class SyncEngine:
             lf = local.get((ft, name))
             rf = remote_by_type[ft].get(name)
             key = file_key(ft, game.romm_id, name)
+
+            # Two system folders that point at the same RomM platform (e.g. "md" and "megadrive") and contain
+            # the same game would fight over one RomM file. Sync the first, report the second.
+            owner = self._claimed.get(key)
+            if owner is not None and owner.lower() != game.platform.lower():
+                if lf:
+                    STATE.record_issue(f"dup:{game.platform}:{key}", game.name, game.platform, name, ft, "duplicate",
+                                       f"The same {ft} is also in the '{owner}' folder, and both folders point at the "
+                                       f"same RomM platform, so only the '{owner}' copy is synced. Keep the game in "
+                                       f"one folder, or point one of the folders at a different platform on the "
+                                       f"Platforms page.")
+                    file_status[f"{ft}:{name}"] = "error"
+                continue
+            self._claimed[key] = game.platform
+            STATE.clear_error(f"dup:{game.platform}:{key}")
             d = decide(lf, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode, force)
 
             if d.kind is None:
@@ -628,7 +691,9 @@ class StaleAction(Exception):
     """The situation changed between queueing and approval."""
 
 
-def cleanup_backups(days: int = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))):
+def cleanup_backups(days: Optional[int] = None):
+    if days is None:
+        days = int(getattr(get_config(), "BACKUP_RETENTION_DAYS", 30))
     root = data_dir() / "backups"
     if days <= 0 or not root.exists():
         return

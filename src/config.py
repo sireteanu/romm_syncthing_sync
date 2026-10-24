@@ -91,6 +91,7 @@ class Config:
         self.PULL_MODE: str = pull_mode if pull_mode in ("off", "confirm", "auto") else "auto"
         # Watch mode only sees local file events, so RomM-side changes are found by polling.
         self.ROMM_POLL_INTERVAL_SECONDS: int = romm_poll_interval_seconds
+        self.BACKUP_RETENTION_DAYS: int = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
 
         # Web GUI
         self.WEB_UI: bool = web_ui

@@ -268,7 +268,8 @@ class WatchdogSyncManager:
             if self.timer_thread is not None and self.timer_thread.is_alive():
                 self.timer_thread.cancel()
 
-            self.timer_thread = threading.Timer(self.watchdog_delay_seconds, self.execute_sync)
+            # read live so a change on the Settings page applies to the next file event
+            self.timer_thread = threading.Timer(get_config().WATCHDOG_DELAY_SECONDS, self.execute_sync)
             self.timer_thread.daemon = False
             self.timer_thread.start()
 
@@ -344,13 +345,14 @@ class PeriodicSyncManager:
                 logger.info("Running periodic sync...")
                 try:
                     t0 = tpc()
-                    self.orchestrator.full_sync(force_sync=self.force_sync)
+                    self.orchestrator.full_sync(force_sync=get_config().FORCE_PUSH_SYNC)
                     logger.info(f"Periodic sync completed in {round(tpc() - t0, 2)} s.")
                 except Exception as e:
                     logger.error(f"Sync failed: {e}")
 
-                STATE.next_sync_at = _in_seconds(int(self.sync_interval))
-                self.wake_event.wait(timeout=int(self.sync_interval))
+                interval = int(get_config().SYNC_INTERVAL_SECONDS)  # live (Settings page)
+                STATE.next_sync_at = _in_seconds(interval)
+                self.wake_event.wait(timeout=interval)
                 self.wake_event.clear()
         finally:
             logger.info("Exiting ('Periodic' sync mode)...")
@@ -390,8 +392,9 @@ class RommPoller:
 
     def _run(self):
         while not self.stop_event.is_set():
-            wait = self.interval if self.interval > 0 else None
-            STATE.next_sync_at = _in_seconds(self.interval) if self.interval > 0 else None
+            interval = max(int(get_config().ROMM_POLL_INTERVAL_SECONDS), 0)  # live (Settings page)
+            wait = interval if interval > 0 else None
+            STATE.next_sync_at = _in_seconds(interval) if interval > 0 else None
             self.wake_event.wait(timeout=wait)
             self.wake_event.clear()
             if self.stop_event.is_set():

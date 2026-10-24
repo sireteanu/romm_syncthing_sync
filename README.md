@@ -24,12 +24,15 @@ A utility for syncing emulator save files and save states across your gaming dev
   - **keep both** (your local copy is stored on RomM as a separate `(conflict …)` entry)
 - **Backups.** Before any file is overwritten (on either side), the version being replaced is copied to `/data/backups/<date>/<system>/`.
 - **Platforms page** to map your system folders to RomM platforms. It uses RomM's official platform list and folder aliases, fetched from RomM's GitHub.
+- **Settings page.** Change sync behaviour, intervals, backup retention and the dashboard password from the browser. Changes apply immediately, no restart.
+- **Notifications** via Discord, ntfy, Gotify, Pushbullet or any webhook. You choose what to hear about: decisions needed, failed files, sync problems, sync activity. You get one message per sync and never the same item twice.
+- **Looks like RomM.** The dashboard uses RomM 5.x's own colours, type and shapes, so it feels at home next to it. It isn't affiliated with the RomM project.
 - **Unraid template** with the web UI link, icon and all settings.
 - **Automatic releases.** Every change pushed to the default branch is tested, tagged, released and published as a Docker image.
 
-| Conflict resolution | Confirmation box | Game details |
+| Conflict resolution | Settings & notifications | Game details |
 |---|---|---|
-| ![Resolve conflict dialog showing local and RomM versions side by side](docs/screenshots/conflict.png) | ![Confirmation dialog before uploading a new save state](docs/screenshots/confirm.png) | ![Game details with screenshot and per-file status](docs/screenshots/game.png) |
+| ![Resolve conflict dialog showing local and RomM versions side by side](docs/screenshots/conflict.png) | ![Settings page with sync behaviour, timing and notification services](docs/screenshots/settings.png) | ![Game details with screenshot and per-file status](docs/screenshots/game.png) |
 
 <details><summary>Phone layout</summary>
 
@@ -233,6 +236,28 @@ Folders are resolved in this order, and most never need a mapping:
 
 See https://docs.romm.app/latest/Platforms-and-Players/Supported-Platforms/ for RomM's supported platforms.
 
+### Settings page & notifications
+
+Most behaviour can be changed on the dashboard's **Settings** tab instead of in the container config. Values saved there override the container's and apply immediately. Each one shows whether it comes from the container or was changed in the dashboard, with a **reset** link. Settings are stored in `/data/settings.json`. Saved tokens and passwords are never sent back to the browser.
+
+**Notifications.** Add one or more services under Settings → Notifications:
+
+| Service | What you need |
+|---|---|
+| Discord | A channel webhook URL (Channel → Edit → Integrations → Webhooks) |
+| ntfy | Server (default `https://ntfy.sh`), topic, optional access token |
+| Gotify | Server URL and an application token |
+| Pushbullet | Your access token (Pushbullet → Settings → Access Tokens) |
+| Webhook | Any URL; receives `{"title", "message", "priority", "url"}` as JSON |
+
+Pick what to be told about:
+- **Questions:** a conflict or other file needs your decision.
+- **Errors:** a file failed.
+- **Sync problems:** RomM unreachable, token rejected, and when it recovers.
+- **Sync activity:** off by default.
+
+If you set the **Dashboard address**, messages link straight to it. Use **Send test** to check a service.
+
 # Releases
 
 Every push to the default branch (`public`) creates a release automatically ([`.github/workflows/release.yml`](.github/workflows/release.yml)):
@@ -260,9 +285,16 @@ SYNC_MODE=watch python romm_sync.py
 
 See [docs/TWO_WAY_SYNC.md](docs/TWO_WAY_SYNC.md) for how the sync engine decides what to do, and [docs/IMPLEMENTATION_SUMMARY.md](docs/IMPLEMENTATION_SUMMARY.md) for the original architecture write-up.
 
+### How saves are matched to games
+
+- **One game per system folder.** A save belongs to the game in the same system folder: `gb/Tetris (World).srm` and `gbc/Tetris (World).srm` are two different games, each matched to its own RomM ROM. A save and a state of the same game in separate saves/states folders (`saves/gba/…`, `states/gba/…`) are still one game.
+- **Exact name first.** A save named after the ROM file (`Pokemon Red (USA, Europe).srm` ↔ `Pokemon Red (USA, Europe).gb`) is matched exactly. A shorter name only matches a ROM whose file name *starts* with it, and the closest one wins. Text in the middle of a name never matches, so "Mario" can't pick "Super Mario World".
+- **Dots in names** ("Dr. Mario (USA).srm", "Super Mario Bros. 3") are handled everywhere, including watch mode.
+- **Two folders, one platform.** If two of your folders point at the same RomM platform (e.g. `md` and `megadrive`) and both contain the same game, the first is synced and the other is listed under **Errors** with an explanation, instead of the two copies overwriting each other on RomM.
+
 # Known issues
 
-- Game names are matched by exact file name against RomM's `fs_name`, as in the original. Saves named differently from the ROM won't match.
+- Saves must be named after the ROM file (RetroArch's default). A save with a completely different name won't match.
 - RomM 5.x saves uploaded by other clients into *slots* get a version tag in their name (`Game [2026-10-01 …].srm`). The tag is stripped when writing to the sync folder, and the newest version wins.
 - ~~Retroarch's state screenshots are not linked to the corresponding state file on the RomM server.~~ Fixed in RomM.
 - ~~Only HTTP Basic Authentication.~~ API tokens supported since 1.4.0.

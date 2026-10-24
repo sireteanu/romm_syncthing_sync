@@ -152,3 +152,116 @@ def test_parse_github_sources():
     assert aliases == {"megadrive": "genesis"}
     names = pf.parse_docs_names("| Name | Folder | x |\n| --- | --- | --- |\n| Sega Mega Drive/Genesis | `genesis` | ... |\n")
     assert names == {"genesis": "Sega Mega Drive/Genesis"}
+
+
+# --- matching (src.library_classes) ---------------------------------------
+from src.library_classes import LibraryScanner, LocalLibrary  # noqa: E402
+
+
+def test_parse_save_filename_handles_dots_and_types():
+    p = LibraryScanner.parse_save_filename
+    assert p("Dr. Mario (USA).srm") == ("Dr. Mario (USA)", "save")
+    assert p("Super Mario Bros. 3 (USA).state1") == ("Super Mario Bros. 3 (USA)", "state")
+    assert p("Super Mario Bros. 3 (USA).state.auto") == ("Super Mario Bros. 3 (USA)", "state")
+    assert p("Super Mario Bros. 3 (USA).state.auto.png") == ("Super Mario Bros. 3 (USA)", "state_screen")
+    assert p("Pokemon Diamond.ml2") == ("Pokemon Diamond", "state")
+    assert p("cover.png") == (None, None)
+    assert p("notes.txt") == (None, None)
+
+
+def test_watchdog_detects_dotted_names():
+    assert LibraryScanner._detect_game_from_watchdog_event(Path("/s/nes/Dr. Mario (USA).srm")) == "Dr. Mario (USA)"
+
+
+def test_watchdog_events_are_grouped_per_system():
+    ev = LibraryScanner._parse_watchdog_events([Path("/s/gb/Tetris (World).srm"), Path("/s/gbc/Tetris (World).srm")])
+    assert set(ev) == {("gb", "Tetris (World)"), ("gbc", "Tetris (World)")}
+
+
+def _rom(fs_name, rid=1):
+    return {"id": rid, "fs_name": fs_name, "fs_name_no_ext": fs_name.rsplit(".", 1)[0] if "." in fs_name else fs_name}
+
+
+def test_find_rom_prefers_exact_and_rejects_middle_substrings():
+    roms = [_rom("Super Mario World (USA).sfc", 1), _rom("Mario Paint (USA).sfc", 2), _rom("Mario (USA).sfc", 3)]
+    assert LibraryScanner.find_rom("Mario (USA)", roms)["id"] == 3
+    assert LibraryScanner.find_rom("Super Mario World (USA)", roms)["id"] == 1
+    assert LibraryScanner.find_rom("World (USA)", roms) is None  # middle-of-name never matches
+
+
+def test_find_rom_prefix_fallback_picks_closest():
+    roms = [_rom("Pokemon Red (USA, Europe) (Rev 1).gb", 1), _rom("Pokemon Red (USA, Europe).gb", 2)]
+    assert LibraryScanner.find_rom("Pokemon Red", roms)["id"] == 2
+    assert LibraryScanner.find_rom("Pokemon Re", roms) is None  # must end at a word boundary
+
+
+def test_same_game_in_two_systems_stays_separate(tmp_path):
+    for sysdir in ("gb", "gbc"):
+        (tmp_path / sysdir).mkdir()
+        (tmp_path / sysdir / "Tetris (World).srm").write_bytes(sysdir.encode())
+    states = tmp_path / "states"
+    lib = LocalLibrary([tmp_path])
+    lib.build_local_library()
+    assert {g.platform for g in lib.games.values()} == {"gb", "gbc"}
+    assert all(len(g.local_save_files) == 1 for g in lib.games.values())
+    assert states.exists() is False
+
+
+def test_saves_and_states_folders_still_merge(tmp_path):
+    sv, st = tmp_path / "saves" / "gba", tmp_path / "states" / "gba"
+    sv.mkdir(parents=True), st.mkdir(parents=True)
+    (sv / "Game (USA).srm").write_bytes(b"s")
+    (st / "Game (USA).state1").write_bytes(b"t")
+    lib = LocalLibrary([tmp_path / "saves", tmp_path / "states"])
+    lib.build_local_library()
+    (game,) = lib.games.values()
+    assert len(game.local_save_files) == 1 and len(game.local_state_files) == 1
+
+
+# --- settings & notifications ----------------------------------------------
+import pytest  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+from src import settings as st  # noqa: E402
+from src import notify  # noqa: E402
+from src.sync_state import STATE, PendingAction  # noqa: E402
+
+
+def _cfg():
+    c = SimpleNamespace(**{k: None for k in st.FIELDS})
+    c.PUSH_NEW_MODE, c.PULL_MODE, c.WEB_USERNAME, c.WEB_PASSWORD = "auto", "auto", "", ""
+    return c
+
+
+def test_invalid_settings_change_nothing():
+    cfg = _cfg()
+    st.apply_to_config(cfg)
+    with pytest.raises(ValueError):
+        st.update(cfg, {"WEB_USERNAME": "me"}, [])  # password missing
+    assert cfg.WEB_USERNAME == ""
+    with pytest.raises(ValueError):
+        st.update(cfg, {"ROMM_POLL_INTERVAL_SECONDS": -1}, [])
+    st.update(cfg, {"PULL_MODE": "off"}, [])
+    assert cfg.PULL_MODE == "off"
+    st.update(cfg, {}, ["PULL_MODE"])
+    assert cfg.PULL_MODE == "auto"
+
+
+def test_notifications_are_not_repeated(monkeypatch):
+    sent = []
+    monkeypatch.setattr(st, "notify_config", lambda: {"channels": [{"type": "webhook", "url": "x"}],
+                                                      "events": {"questions": True, "errors": True,
+                                                                 "activity": False, "problems": True},
+                                                      "dashboard_url": ""})
+    monkeypatch.setattr(notify, "send", lambda title, body, prio="normal", channels=None: sent.append(title))
+    monkeypatch.setattr(notify.threading, "Thread",
+                        lambda target, args, **kw: SimpleNamespace(start=lambda: target(*args)))
+    a = PendingAction(kind="conflict", file_type="save", game="G", platform="snes", rom_id=1, file_name="G.srm")
+    with STATE.lock:
+        STATE.pending[a.id] = a
+    try:
+        notify.after_sync({"pushed": 0, "pulled": 0})
+        notify.after_sync({"pushed": 0, "pulled": 0})
+        assert len(sent) == 1 and "conflict" in sent[0]
+    finally:
+        with STATE.lock:
+            STATE.pending.pop(a.id, None)

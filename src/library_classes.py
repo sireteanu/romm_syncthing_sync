@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from collections import defaultdict
 from loguru import logger
+import os
 import re
 import yaml
 
@@ -105,17 +106,34 @@ class RetroGameServer:
         return platform_catalog.resolve(local_platform_name, self.PLATFORM_MAP, self.library_slugs,
                                         self.library_fs_slugs, aliases)
 
-    @staticmethod
-    def _platforms_to_fetch(romm_user: RommUser, sync_dirs, platform_map: dict):
-        """RomM platforms that have a matching folder in the sync folders -> [(platform_id, label)].
-        Returns None (= read everything) if RomM's platform list isn't available."""
+    # Cached RomM library, reused between syncs (see build_romm_library)
+    _cache: Optional[dict] = None
+    LIBRARY_MAX_AGE = 6 * 3600  # seconds before a full re-read regardless
+    _last_unresolved: Optional[tuple] = None
+
+    LIBRARY_COLUMNS = {
+        'id', 'name', 'platform_slug', 'platform_id', 'fs_name', 'fs_size_bytes', 'platform_display_name',
+        # used by the web GUI / pull sync
+        'fs_name_no_ext', 'platform_fs_slug', 'path_cover_small', 'path_cover_large', 'url_cover',
+        'merged_screenshots',
+    }
+
+    @classmethod
+    def _trim(cls, page):
+        # Keep only the fields we use, page by page (full ROM records are large).
+        return [{k: v for k, v in item.items() if k in cls.LIBRARY_COLUMNS} for item in page]
+
+    @classmethod
+    def _platforms_to_fetch(cls, romm_user: RommUser, sync_dirs, platform_map: dict):
+        """RomM platforms that have a matching folder in the sync folders.
+        -> ([(platform_id, label)], {platform_id: rom_count}), or (None, None) = read everything."""
         if not sync_dirs:
-            return None
+            return None, None
         try:
             platforms = romm_user.list_platforms()
         except Exception as e:
             logger.info(f"Couldn't list RomM platforms ({e}); reading the whole library.")
-            return None
+            return None, None
         slugs = {p["slug"] for p in platforms}
         fs = {str(p.get("fs_slug", "")).lower(): p["slug"] for p in platforms if p.get("fs_slug")}
         aliases = platform_catalog.get_catalog().get("aliases", {})
@@ -126,55 +144,75 @@ class RetroGameServer:
                 wanted.add(slug)
             else:
                 unresolved.append(folder)
-        if unresolved:
+        if unresolved and tuple(unresolved) != cls._last_unresolved:
             logger.info(f"Sync folders without a RomM platform (see the Platforms page): {', '.join(unresolved)}")
+        cls._last_unresolved = tuple(unresolved)
         chosen = [(p["id"], p.get("custom_name") or p.get("display_name") or p.get("name") or p["slug"])
                   for p in platforms if p["slug"] in wanted]
-        total = sum(p.get("rom_count", 0) for p in platforms if p["slug"] in wanted)
-        all_total = sum(p.get("rom_count", 0) for p in platforms)
-        logger.info(f"Reading {total:,} ROMs from {len(chosen)} RomM platform(s) that have sync folders "
-                    f"(skipping {all_total - total:,} ROMs on other platforms).")
-        return chosen
+        counts = {p["id"]: p.get("rom_count", 0) for p in platforms if p["slug"] in wanted}
+        cls._all_total = sum(p.get("rom_count", 0) for p in platforms)
+        return chosen, counts
 
     @classmethod
     def build_romm_library(cls,
                            romm_user: RommUser,
-                           sync_dirs=None):
+                           sync_dirs=None,
+                           force: bool = False):
         """Factory method to instantiate a RetroGameServerClass with romm library info.
-        With sync_dirs, only platforms that have a folder in the sync folders are read."""
-        from time import perf_counter
-        from .sync_state import ProgressReporter
 
-        # define the keys of the json response we want early
-        library_columns = {
-            'id': int,
-            'name': str,
-            'platform_slug': str,
-            'platform_id': int,
-            'fs_name': str,
-            'fs_size_bytes': int,
-            'platform_display_name': str,
-            # used by the web GUI / pull sync
-            'fs_name_no_ext': str,
-            'platform_fs_slug': str,
-            'path_cover_small': str,
-            'path_cover_large': str,
-            'url_cover': str,
-            'merged_screenshots': list,
-        }
-
-        def trim(page):
-            # Keep only the fields we use, page by page (full ROM records are large).
-            return [{k: v for k, v in item.items() if k in library_columns} for item in page]
+        With sync_dirs, only platforms that have a folder in the sync folders are read, and the result is
+        cached: later calls re-use it when RomM's per-platform ROM counts are unchanged, fetching only ROMs
+        changed since the last read (RomM 5.x `updated_after`). A full re-read happens when counts or the set
+        of platforms change, after LIBRARY_MAX_AGE, or with force=True.
+        """
+        import time
+        from datetime import datetime, timezone, timedelta
+        from .sync_state import ProgressReporter, STATE
 
         platform_map = cls._load_platform_mapping()
-        t0 = perf_counter()
-        platform_ids = cls._platforms_to_fetch(romm_user, sync_dirs, platform_map)
-        data = romm_user.get_full_library(platform_ids=platform_ids, trim=trim,
-                                          on_progress=ProgressReporter("building", "Reading RomM library"))
-        library = data['items']
-        logger.info(f"RomM library read: {len(library):,} ROMs in {perf_counter() - t0:.1f}s.")
+        t0 = time.perf_counter()
+        chosen, counts = cls._platforms_to_fetch(romm_user, sync_dirs, platform_map)
+        progress = ProgressReporter("building", "Reading RomM library")
+        cache = cls._cache
+        key = tuple(sorted(counts)) if counts is not None else None
 
+        reusable = (not force and cache is not None and key is not None and cache["key"] == key
+                    and cache["counts"] == counts and time.time() - cache["at"] < cls.LIBRARY_MAX_AGE)
+        if reusable:
+            rows = {r["id"]: r for r in cache["library"]}
+            romm_major = int((STATE.romm_version or "0").split(".")[0] or 0) if STATE.romm_version else 0
+            changed = []
+            if romm_major >= 5 and chosen:
+                since = (cache["fetched_at"] - timedelta(minutes=1)).isoformat()
+                try:
+                    changed = romm_user._fetch_roms({"platform_ids": [pid for pid, _ in chosen], "updated_after": since},
+                                                    "changed ROMs", cls._trim, None)
+                    # Safety: if RomM didn't apply the filter we'd get the whole library back; treat as a full read.
+                    if len(changed) > max(50, len(rows) // 2):
+                        reusable = False
+                except Exception as e:
+                    logger.debug(f"Incremental library refresh failed ({e}); doing a full read.")
+                    reusable = False
+            if reusable:
+                for r in changed:
+                    rows[r["id"]] = r
+                library = list(rows.values())
+                cache.update(library=library, fetched_at=datetime.now(timezone.utc))
+                logger.info(f"RomM library unchanged — reused {len(library):,} ROMs"
+                            + (f", refreshed {len(changed)} changed" if changed else "")
+                            + f" ({time.perf_counter() - t0:.1f}s).")
+                return cls(library=library, platform_map=platform_map)
+
+        if counts is not None:
+            total = sum(counts.values())
+            logger.info(f"Reading {total:,} ROMs from {len(chosen)} RomM platform(s) that have sync folders "
+                        f"(skipping {getattr(cls, '_all_total', total) - total:,} ROMs on other platforms).")
+        fetched_at = datetime.now(timezone.utc)
+        data = romm_user.get_full_library(platform_ids=chosen, trim=cls._trim, on_progress=progress)
+        library = data['items']
+        logger.info(f"RomM library read: {len(library):,} ROMs in {time.perf_counter() - t0:.1f}s.")
+        if key is not None:
+            cls._cache = {"key": key, "counts": counts, "library": library, "at": time.time(), "fetched_at": fetched_at}
         return cls(library=library, platform_map=platform_map)
 
     def count(self):
@@ -265,20 +303,27 @@ class LocalLibrary:
                 logger.debug("Building 'Game' objects for local library...")
                 for game_name, file_info in games_dict.items():
                     logger.debug(f"Processing game: {game_name} ({len(file_info['saves'])} saves, {len(file_info['states'])} states)")
-                    if game_name in self.games:
-                        existing_game = self.games[game_name]
+                    # Keyed by system folder + name: the same game in saves/gba and states/gba is one game,
+                    # but gb/Tetris and gbc/Tetris are two different games.
+                    key = self.game_key(platform_name, game_name)
+                    if key in self.games:
+                        existing_game = self.games[key]
                         LibraryScanner._load_local_saves_and_states(g=existing_game, file_info=file_info)
                     else:
-                        new_game = Game(name=game_name, path=file_info['path'], platform=file_info['platform'])  
+                        new_game = Game(name=game_name, path=file_info['path'], platform=file_info['platform'])
                         LibraryScanner._load_local_saves_and_states(g=new_game, file_info=file_info)
-                        self.games[game_name] = new_game
+                        self.games[key] = new_game
 
                     logger.debug(f"  Added {game_name} to library")
 
     # region Utility Functions
-    def get_game_by_name(self, game_name: str) -> Optional[Game]:
-        """Get a game from the library by name."""
-        return self.games.get(game_name)
+    @staticmethod
+    def game_key(platform: str, game_name: str) -> str:
+        return f"{platform.lower()}/{game_name}"
+
+    def get_game(self, platform: str, game_name: str) -> Optional[Game]:
+        """Get a game from the library by system folder + name."""
+        return self.games.get(self.game_key(platform, game_name))
 
     def get_unmatched_games(self) -> List[Game]:
         """Return list of local games that couldn't be matched to ROMM."""
@@ -317,7 +362,7 @@ class LocalLibrary:
             # Expected structure: sync_folder/platform_name/game_name.ext
             platform_dir = event_file_path.parent
             platform_name = platform_dir.name
-            game_name = event_file_path.stem
+            game_name, _ = LibraryScanner.parse_save_filename(event_file_path.name)
 
             # Scan platform directory and collect files for this game
             files = LibraryScanner._collect_games(platform_dir)
@@ -334,7 +379,7 @@ class LocalLibrary:
             LibraryScanner._load_local_saves_and_states(g=new_game, file_info=file_info)
 
             # Add to games dict
-            self.games[game_name] = new_game
+            self.games[self.game_key(platform_name, game_name)] = new_game
             logger.info(f"[WATCHDOGSYNC] Added new game to library: {game_name}")
 
             return new_game
@@ -360,11 +405,11 @@ class LocalLibrary:
         """
         game_changed_files = LibraryScanner._parse_watchdog_events(event_paths=event_paths)
 
-        affected_games_dict = {}  # game_name -> Game object
+        affected_games_dict = {}  # "platform/game" -> Game object
 
-        for game_name, changed_files in game_changed_files.items():
+        for (platform_name, game_name), changed_files in game_changed_files.items():
             # Find or create the game
-            matching_Game = self.get_game_by_name(game_name)
+            matching_Game = self.get_game(platform_name, game_name)
             if not matching_Game:
                 logger.info(f"[WATCHDOGSYNC] New game detected: {game_name}")
                 # Use one of the changed files to add a game. It will be named the same as the ROM by save file/state convention
@@ -377,7 +422,7 @@ class LocalLibrary:
 
             # Rescan the game's directory to pick up any new/updated save files.
             self._rescan_local_saves_and_states(matching_Game)
-            affected_games_dict[game_name] = matching_Game
+            affected_games_dict[self.game_key(platform_name, game_name)] = matching_Game
 
         return list(affected_games_dict.values())
     # endregion
@@ -385,6 +430,8 @@ class LocalLibrary:
 
 class LibraryScanner:
     """Utility class for library scanning functions to interface between LocalLibrary, RetroGameServer, and SyncOrchestrator"""
+
+    _warned_unmatched: set = set()  # warn about each unmatched game once, not on every sync
 
     # region LocalLibrary helpers
     @staticmethod
@@ -429,33 +476,10 @@ class LibraryScanner:
         Returns:
             Updated games_dict with file categorized and added
         """
-        filename = file_path.name
-
-        # Extract base game name and file type
-        # Patterns: game.state, game.state0, game.state1, game.state.auto
-        #           game.state.png, game.state0.png, game.state.auto.png
-        game_name = None
-        file_type = None
-
-        # Check for state screenshot (.state.png, .state0.png, .state.auto.png)
-        state_screen_match = re.match(r'^(.+?)\.state(?:\d+|\.auto)?\.png$', filename)
-        if state_screen_match:
-            game_name = state_screen_match.group(1)
-            file_type = 'state_screen'
-        else:
-            # check for the actual states. RA-style and others *should* be mutually exclusive.
-            state_match = re.match(r'^(.+?)\.state(?:\d+|\.auto)?$', filename)  # general retroarch state extension
-            melonds_match = re.match(r'^(.+?)\.ml\d+$', filename)  # melonDS state extension ".ml{n}"
-            if state_match:
-                game_name = state_match.group(1)
-                file_type = 'state'
-            elif melonds_match:  # melonDS state extension
-                game_name = melonds_match.group(1)
-                file_type = 'state'
-            else:
-                # Regular save file (.srm, .sav, etc.)
-                game_name = file_path.stem
-                file_type = 'save'
+        game_name, file_type = LibraryScanner.parse_save_filename(file_path.name)
+        if file_type is None:
+            logger.debug(f"Ignoring {file_path.name} (not a save or state)")
+            return games_dict
 
         # Initialize game entry if not seen before
         if game_name not in games_dict:
@@ -476,6 +500,31 @@ class LibraryScanner:
             games_dict[game_name]['screens'].append(file_path)
 
         return games_dict
+
+    # Files in a system folder that are never saves (cover art, notes, temp files...)
+    IGNORED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".txt", ".log", ".tmp", ".bak", ".db", ".ini",
+                          ".cfg", ".xml", ".json", ".m3u", ".zip", ".7z"}
+
+    @staticmethod
+    def parse_save_filename(filename: str):
+        """-> (game_name, 'save' | 'state' | 'state_screen' | None).
+
+        The game name is the ROM's file name, which may itself contain dots ("Dr. Mario (USA).srm").
+          Game.srm / Game.sav / Game.dsv ...      -> save
+          Game.state, Game.state1, Game.state.auto -> state (RetroArch)
+          Game.ml0 ...                              -> state (melonDS)
+          Game.state1.png / Game.state.auto.png     -> state_screen
+        """
+        m = re.match(r'^(.+?)\.state(?:\d+|\.auto)?\.png$', filename)
+        if m:
+            return m.group(1), 'state_screen'
+        m = re.match(r'^(.+?)\.state(?:\d+|\.auto)?$', filename) or re.match(r'^(.+?)\.ml\d+$', filename)
+        if m:
+            return m.group(1), 'state'
+        stem, ext = os.path.splitext(filename)
+        if not stem or not ext or ext.lower() in LibraryScanner.IGNORED_EXTENSIONS:
+            return None, None
+        return stem, 'save'
 
     @staticmethod
     def _load_local_saves_and_states(g: Game, file_info: dict):
@@ -531,32 +580,73 @@ class LibraryScanner:
                 # For example: retroarch save srm: "Castlevania - Symphony of the Night (USA).srm", romm['name']: "Castlevania: Symphony of the Night"
                 # romm_library.library columns: 'fs_name' (full romm filename including region and extension i.e. "Metal Slug X (USA).chd")
                 #   I went with this way because it'd be reliable and broad enough, but there are other objects I could use.
-                matching_game_entry = [g for g in platform_games if game.name in g['fs_name']]  # list that's expected to have one match
+                match = LibraryScanner.find_rom(game.name, platform_games)
+                matching_game_entry = [match] if match else []
 
                 if len(matching_game_entry) > 0:
                     game.set_romm_data(matching_game_entry[0])
                 else:
                     # Game not found in ROMM library
-                    logger.warning(f"Could not match {game.name} with platform '{game.platform}' to ROMM server. Check this folder on the Platforms page and that the game is in your RomM library.")
+                    msg = (f"Could not match {game.name} with platform '{game.platform}' to ROMM server. "
+                           "Check this folder on the Platforms page and that the game is in your RomM library.")
+                    warn_key = f"{game.platform}/{game.name}"
+                    if warn_key in LibraryScanner._warned_unmatched:
+                        logger.debug(msg)  # already warned once
+                    else:
+                        LibraryScanner._warned_unmatched.add(warn_key)
+                        logger.warning(msg)
                     game.is_matched = False
 
             else:
                 logger.warning(f"Failed to match {game.name}. Games must be organized by platform/content directory. Check your local library structure.")
 
+    @staticmethod
+    def _norm(text: str) -> str:
+        return " ".join(str(text).casefold().split())
+
+    @staticmethod
+    def find_rom(save_name: str, platform_games: List[dict]) -> Optional[dict]:
+        """Pick the RomM ROM a save belongs to. RetroArch names saves after the ROM file, so:
+          1. exact: ROM file name without extension (or a multi-file ROM's folder name) == save name
+          2. prefix: ROM file name starts with the save name followed by a space/bracket/dot
+             (e.g. a save "Pokemon Red" for "Pokemon Red (USA, Europe).gb"); the closest one wins
+        Substrings in the middle ("Mario" in "Super Mario World") never match.
+        """
+        want = LibraryScanner._norm(save_name)
+        exact = []
+        for g in platform_games:
+            fs_name = g.get('fs_name') or ""
+            stem = g.get('fs_name_no_ext') or os.path.splitext(fs_name)[0]
+            if want in (LibraryScanner._norm(stem), LibraryScanner._norm(fs_name)):
+                exact.append(g)
+        if exact:
+            if len(exact) > 1:
+                logger.debug(f"{save_name}: {len(exact)} exact ROM matches, using {exact[0]['fs_name']}")
+            return exact[0]
+        prefix = []
+        for g in platform_games:
+            fs = LibraryScanner._norm(g.get('fs_name') or "")
+            if fs.startswith(want) and len(fs) > len(want) and fs[len(want)] in " ([.-_":
+                prefix.append(g)
+        if not prefix:
+            return None
+        best = min(prefix, key=lambda g: len(g.get('fs_name') or ""))
+        if len(prefix) > 1:
+            logger.info(f"{save_name}: no exact ROM name match; closest of {len(prefix)} candidates is {best['fs_name']}")
+        return best
+
     # Helpers for watchdog sync
     @staticmethod
     def _parse_watchdog_events(event_paths: List[Path]) -> dict:
         """Parse a list of watchdog events and map them to existing games."""
-        game_changed_files = {}  # game_name -> set of Path objects
+        game_changed_files = {}  # (platform folder, game_name) -> set of Path objects
 
         # Pre-filter captured events for the relevant file changes.
         # If we don't do this, every chunk that syncthing pushes will get processed. The sync is robust enough to reject these, but it clutters the logs.
         for event_path in event_paths:
             game_name = LibraryScanner._detect_game_from_watchdog_event(event_path)
             if game_name is not None:
-                if game_name not in game_changed_files:
-                    game_changed_files[game_name] = set()
-                game_changed_files[game_name].add(event_path)
+                game_changed_files.setdefault((event_path.parent.name, game_name), set()).add(event_path)
 
         return game_changed_files
 
@@ -566,6 +656,7 @@ class LibraryScanner:
 
         Note: Metadata files are already filtered by FileChangeHandler, so this receives only valid game files.
         """
-        event = event_path.name
-        logger.debug(f"[WATCHDOGSYNC] Found modified savedata: {event}.")
-        return str(event).split(".")[0]  # game name will be everything before the FIRST extension
+        logger.debug(f"[WATCHDOGSYNC] Found modified savedata: {event_path.name}.")
+        # Same parser as the folder scan, so "Dr. Mario (USA).srm" is "Dr. Mario (USA)", not "Dr"
+        game_name, _ = LibraryScanner.parse_save_filename(event_path.name)
+        return game_name

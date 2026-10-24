@@ -22,7 +22,7 @@ import random
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import Response
 
 PLATFORMS = {
@@ -50,6 +50,7 @@ class Store:
         self.next_id = 100
         self.page_delay = 0.0
         self.fail_uploads = False
+        self.rom_requests = 0
 
     def add_rom(self, rom_id: int, platform_id: int, fs_name: str, name: str):
         slug, display, _ = PLATFORMS[platform_id]
@@ -63,6 +64,7 @@ class Store:
             "path_cover_large": f"/assets/romm/resources/roms/{platform_id}/{rom_id}/cover/big.png",
             "url_cover": None,
             "merged_screenshots": [f"/assets/romm/resources/roms/{platform_id}/{rom_id}/screenshots/0.png"],
+            "updated_at": DEMO_T0.isoformat(),
         })
 
     def add_asset(self, kind: str, rom_id: int, file_name: str, content: bytes,
@@ -101,12 +103,33 @@ def heartbeat():
 
 
 @app.get("/api/roms")
-def roms(limit: int = 50, offset: int = 0, platform_ids: Optional[int] = None, with_total: bool = True):
+def roms(limit: int = 50, offset: int = 0, platform_ids: Optional[List[int]] = Query(None),
+         with_total: bool = True, updated_after: Optional[str] = None):
     import time
-    pool = [r for r in S.roms if platform_ids is None or r["platform_id"] == platform_ids]
+    pool = [r for r in S.roms if not platform_ids or r["platform_id"] in platform_ids]
+    if updated_after:
+        cutoff = datetime.fromisoformat(updated_after.replace("Z", "+00:00"))
+        pool = [r for r in pool if datetime.fromisoformat(r["updated_at"]) > cutoff]
+    S.rom_requests += 1
     time.sleep(S.page_delay)
     items = pool[offset:offset + limit]
     return {"items": items, "total": len(pool) if with_total else None, "limit": limit, "offset": offset}
+
+
+@app.post("/debug/touch/{rom_id}")
+def debug_touch(rom_id: int, name: str = ""):
+    for r in S.roms:
+        if r["id"] == rom_id:
+            r["updated_at"] = now().isoformat()
+            if name:
+                r["name"] = name
+            return r
+    raise HTTPException(404)
+
+
+@app.get("/debug/stats")
+def debug_stats():
+    return {"rom_requests": S.rom_requests}
 
 
 @app.get("/api/platforms")
