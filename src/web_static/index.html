@@ -395,7 +395,7 @@ async function api(path, opts={}){
   return body;
 }
 const PHASES = {starting:"Starting", idle:"Up to date", building:"Scanning", fetching:"Talking to RomM", syncing:"Syncing", applying:"Applying", error:"Problem"};
-const STATUS_LABEL = {synced:"Synced", pending:"Awaiting approval", conflict:"Conflict", error:"Error", unmatched:"Not in RomM", "romm-only":"Only on RomM"};
+const STATUS_LABEL = {synced:"Synced", pending:"Needs decision", conflict:"Conflict", error:"Error", unmatched:"Not in RomM", "romm-only":"Only on RomM"};
 const KIND = {
   push_new:{dir:"up", label:"Upload", tab:"push"}, push_update:{dir:"up", label:"Upload", tab:"push"},
   pull_new:{dir:"down", label:"Download", tab:"pull"}, pull_update:{dir:"down", label:"Download", tab:"pull"},
@@ -532,7 +532,10 @@ function openGame(g){
 // ---------- render ----------
 function renderStatus(d){
   const busy = ["building","fetching","syncing","applying","starting"].includes(d.phase);
-  $("#phase-label").textContent = PHASES[d.phase] || d.phase;
+  let label = PHASES[d.phase] || d.phase;
+  if (d.phase === "idle" && (d.errors||[]).length) label = "Synced, with errors";
+  else if (d.phase === "idle" && d.pending.length) label = "Needs your input";
+  $("#phase-label").textContent = label;
   $("#phase-detail").textContent = d.phase_detail || "";
   const p = d.progress || {}; const pct = p.total ? Math.round(100*p.current/p.total) : 0;
   const bar = $("#bar");
@@ -547,11 +550,12 @@ function renderStatus(d){
     chips.push(`<span class="chip info">⬆ <b>${r.pushed}</b> uploaded</span>`);
     chips.push(`<span class="chip ok">⬇ <b>${r.pulled}</b> downloaded</span>`);
     chips.push(`<span class="chip">✓ <b>${r.in_sync}</b> in sync</span>`);
-    if (r.errors) chips.push(`<span class="chip bad">✘ <b>${r.errors}</b> errors</span>`);
+
     if (r.unmatched) chips.push(`<span class="chip">? <b>${r.unmatched}</b> unmatched</span>`);
   }
   const conflicts = d.pending.filter(a=>a.kind==="conflict").length, waiting = d.pending.length - conflicts;
-  if (waiting) chips.push(`<span class="chip warn">⏸ <b>${waiting}</b> awaiting approval</span>`);
+  if (waiting) chips.push(`<span class="chip warn">⏸ <b>${waiting}</b> need${waiting===1?"s":""} a decision</span>`);
+  if ((d.errors||[]).length) chips.push(`<span class="chip bad">✘ <b>${d.errors.length}</b> file${d.errors.length===1?"":"s"} failed</span>`);
   if (conflicts) chips.push(`<span class="chip bad">⚠ <b>${conflicts}</b> conflict${conflicts>1?"s":""}</span>`);
   $("#result-chips").innerHTML = chips.join("");
 
@@ -585,28 +589,43 @@ function renderStatus(d){
 
 function renderApprovals(force=false){
   const d = state.data; if(!d) return;
-  const list = d.pending;
-  $("#approvals-section").hidden = list.length === 0;
-  $("#pending-count").textContent = list.length;
-  if (!list.length) return;
-  const groups = {conflict:[], push:[], pull:[]};
+  const list = d.pending, errs = d.errors || [];
+  $("#approvals-section").hidden = list.length === 0 && errs.length === 0;
+  $("#pending-count").textContent = list.length + errs.length;
+  if (!list.length && !errs.length) return;
+  const groups = {conflict:[], errors:errs, push:[], pull:[]};
   list.forEach(a => groups[KIND[a.kind].tab].push(a));
-  if (!state.tab || !groups[state.tab].length) state.tab = groups.conflict.length ? "conflict" : groups.push.length ? "push" : "pull";
-  const h = hashOf([list, state.tab, [...state.busy]]);
+  if (!state.tab || !groups[state.tab].length) state.tab = ["conflict","errors","push","pull"].find(k => groups[k].length);
+  const h = hashOf([list, errs, state.tab, [...state.busy]]);
   if (!force && state.lastHash.ap === h) return; state.lastHash.ap = h;
 
-  const tabs = [["conflict","Conflicts","conf"],["push","Folder → RomM",""],["pull","RomM → Folder",""]]
+  const tabs = [["conflict","Conflicts","conf"],["errors","Errors","conf"],["push","Folder → RomM",""],["pull","RomM → Folder",""]]
     .filter(([k])=>groups[k].length)
     .map(([k,l,c])=>`<button class="tab ${c} ${state.tab===k?"active":""}" data-tab="${k}">${l}<span class="n">${groups[k].length}</span></button>`).join("");
   $("#ap-tabs").innerHTML = tabs;
   $("#ap-tabs").querySelectorAll(".tab").forEach(b=>b.onclick=()=>{state.tab=b.dataset.tab; renderApprovals(true);});
 
   const cur = groups[state.tab];
+  if (state.tab === "errors") {
+    $("#ap-head").innerHTML = `<span class="title">Couldn't sync</span><span class="muted">These files failed. Fix the cause below, then retry. Files that succeed later clear themselves.</span><span class="spacer"></span><button class="btn small primary" id="err-retry">Retry all now</button>`;
+    $("#err-retry").onclick = async () => { try { await api("api/errors/retry",{method:"POST"}); toast("Retrying…"); poll(); } catch(e){ toast("⚠ "+e.message); } };
+    $("#ap-list").innerHTML = errs.map(e => `<div class="ap-row">
+      <div class="thumb" style="display:grid;place-items:center;color:var(--bad);font-size:20px">⚠</div>
+      <div style="min-width:0">
+        <div class="name"><span class="dir conf">${e.kind.startsWith("push")?"Upload failed":e.kind.startsWith("pull")?"Download failed":"Failed"}</span>${esc(e.game)} <span style="color:var(--muted);font-weight:400">· ${esc(e.platform)}</span></div>
+        <div class="file">${esc(e.file_name)} · ${ago(e.at)}${e.count>1?` · failed ${e.count}×`:""}</div>
+        <div class="why" style="color:var(--text)">${esc(e.message)}</div>
+        ${e.detail?`<details class="why"><summary style="cursor:pointer">Technical details</summary><code style="white-space:pre-wrap;word-break:break-word">${esc(e.detail)}</code></details>`:""}
+      </div>
+      <div class="acts"><button class="btn small" data-dismiss="${esc(e.key)}">Dismiss</button></div></div>`).join("");
+    $("#ap-list").querySelectorAll("[data-dismiss]").forEach(b => b.onclick = async () => { await api("api/errors/dismiss",{method:"POST",body:JSON.stringify({key:b.dataset.dismiss})}); poll(); });
+    return;
+  }
   const head = {
     conflict:`<span class="title">Changed in both places</span><span class="muted">Pick which version wins — or keep both. Nothing is overwritten until you choose.</span>`,
-    push:`<span class="title">New or changed in your sync folder</span><span class="muted">Approve to upload to RomM.</span><span class="spacer"></span>
+    push:`<span class="title">Upload to RomM?</span><span class="muted">These need a decision. Everything else uploads automatically.</span><span class="spacer"></span>
           <button class="btn small" id="rej-all">Skip all</button><button class="btn small primary" id="ok-all">Upload all ${cur.length}</button>`,
-    pull:`<span class="title">New or changed on RomM</span><span class="muted">Approve to write into your sync folder.</span><span class="spacer"></span>
+    pull:`<span class="title">Download from RomM?</span><span class="muted">These need a decision. Everything else downloads automatically.</span><span class="spacer"></span>
           <button class="btn small" id="rej-all">Skip all</button><button class="btn small primary" id="ok-all">Download all ${cur.length}</button>`,
   }[state.tab];
   $("#ap-head").innerHTML = head;
@@ -624,7 +643,7 @@ function renderApprovals(force=false){
       <div style="min-width:0">
         <div class="name"><span class="dir ${k.dir}">${a.kind.endsWith("_update")?k.label+" · overwrite":k.label}</span>${esc(a.game)} <span style="color:var(--muted);font-weight:400">· ${esc(a.platform)}</span></div>
         <div class="file">${esc(a.file_name)} · ${meta}</div>
-        <div class="why">${esc(a.reason)}</div>
+        <div class="why" style="color:var(--text);opacity:.85">${esc(a.reason)}</div>
       </div>
       <div class="acts">${busy?`<span class="pill"><span class="dot busy"></span>working</span>`:
         a.kind==="conflict" ? `<button class="btn small primary" data-resolve="${a.id}">Resolve…</button>`

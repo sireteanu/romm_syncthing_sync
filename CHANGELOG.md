@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.4.0 — automatic by default, asks only when unclear
+
+### Changed
+- Uploads and downloads are automatic by default (`PUSH_NEW_MODE=auto`, `PULL_MODE=auto`). You're only asked when the right answer is unclear:
+  - a conflict (the file changed on both sides)
+  - a previously synced file that is missing on one side (possibly a deliberate delete)
+  - two different copies with no sync history where RomM's is newer
+- Each question explains in plain language why it's being asked.
+
+### Added
+- An **Errors** tab lists files that failed to sync, with a human-readable cause (token permissions, read-only folder, file too large, RomM unreachable, RomM server errors…), technical details, **Retry all** and **Dismiss**. Errors clear themselves once the file syncs.
+- The status headline says "Synced, with errors" or "Needs your input" instead of "Up to date" when appropriate.
+
 ## 2.3.1 — version in the interface
 
 ### Added

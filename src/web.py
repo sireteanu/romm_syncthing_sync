@@ -158,6 +158,22 @@ def create_app(cfg) -> FastAPI:
             STATE.request_sync_callback()  # refresh the dashboard numbers
         return JSONResponse({"ok": ok, "message": msg}, status_code=200 if ok else 409)
 
+    @app.post("/api/errors/retry")
+    def errors_retry():
+        """Clear the error list and run a sync; anything still failing shows up again."""
+        with STATE.lock:
+            n = len(STATE.errors)
+            STATE.errors.clear()
+        if STATE.request_sync_callback:
+            STATE.request_sync_callback()
+        STATE.add_activity("INFO", f"Retrying {n} failed file(s)")
+        return {"ok": True}
+
+    @app.post("/api/errors/dismiss")
+    def errors_dismiss(body: Dict[str, str]):
+        STATE.clear_error(body.get("key", ""))
+        return {"ok": True}
+
     @app.post("/api/actions/bulk")
     def decide_bulk(body: BulkDecision):
         if body.decision not in VALID_DECISIONS:

@@ -49,6 +49,7 @@ class Store:
         self.blobs: Dict[str, bytes] = {}
         self.next_id = 100
         self.page_delay = 0.0
+        self.fail_uploads = False
 
     def add_rom(self, rom_id: int, platform_id: int, fs_name: str, name: str):
         slug, display, _ = PLATFORMS[platform_id]
@@ -151,6 +152,8 @@ def content(kind: str, aid: int):
 
 @app.post("/api/{kind}")
 async def upload(kind: str, request: Request, rom_id: int):
+    if S.fail_uploads:
+        raise HTTPException(403, "Forbidden: missing scope assets.write")
     form = await request.form()
     f = form.get("saveFile") or form.get("stateFile")
     if f is None:
@@ -295,6 +298,7 @@ if __name__ == "__main__":
     ap.add_argument("--port", type=int, default=8099)
     ap.add_argument("--seed", default="demo")
     ap.add_argument("--big", type=int, default=0, help="add N filler ROMs (half on snes, half on arcade)")
+    ap.add_argument("--fail-uploads", action="store_true", help="reject new uploads with 403 (missing token scope)")
     ap.add_argument("--page-delay", type=float, default=0.0, help="seconds per /api/roms page")
     a = ap.parse_args()
     if a.seed == "demo":
@@ -303,4 +307,5 @@ if __name__ == "__main__":
         pid = 1 if i % 2 else 9
         S.add_rom(10000 + i, pid, f"Filler Title {i:05d} (USA).zip", f"Filler Title {i:05d}")
     S.page_delay = a.page_delay
+    S.fail_uploads = a.fail_uploads
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning")

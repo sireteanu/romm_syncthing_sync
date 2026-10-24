@@ -6,7 +6,7 @@ from pathlib import Path
 
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="romm_sync_test_"))
 
-from src.sync_engine import Decision, LocalFile, decide, local_name_for_remote  # noqa: E402
+from src.sync_engine import LocalFile, decide, local_name_for_remote  # noqa: E402
 
 T0 = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
@@ -24,12 +24,13 @@ def base(lh="aaa", rt=T0, rid=5, rh=None):
 
 
 # --- one side only -------------------------------------------------------
-def test_new_local_file_waits_for_approval_by_default():
-    assert decide(local(), None, None) == Decision("push_new", False, "Not on RomM yet")
+def test_new_local_file_uploads_automatically_by_default():
+    d = decide(local(), None, None)
+    assert d.kind == "push_new" and d.auto is True
 
 
-def test_new_local_file_auto_mode():
-    assert decide(local(), None, None, push_new_mode="auto").auto is True
+def test_new_local_file_confirm_mode():
+    assert decide(local(), None, None, push_new_mode="confirm").auto is False
 
 
 def test_local_file_deleted_on_romm_never_auto_uploads():
@@ -39,8 +40,9 @@ def test_local_file_deleted_on_romm_never_auto_uploads():
 
 def test_new_remote_file_respects_pull_mode():
     assert decide(None, remote(), None, pull_mode="off").kind is None
-    assert decide(None, remote(), None, pull_mode="confirm") == Decision("pull_new", False, "On RomM but not in the sync folder")
-    assert decide(None, remote(), None, pull_mode="auto").auto is True
+    d = decide(None, remote(), None, pull_mode="confirm")
+    assert d.kind == "pull_new" and d.auto is False
+    assert decide(None, remote(), None).auto is True  # default: automatic
 
 
 def test_remote_file_deleted_locally_never_auto_downloads():
@@ -63,9 +65,15 @@ def test_no_baseline_remote_newer_without_hash_is_adopted():
     assert decide(local(t=T0), remote(t=T0 + timedelta(hours=1)), None).kind == "adopt"
 
 
-def test_no_baseline_remote_newer_with_different_hash_pulls():
-    d = decide(local("aaa", T0), remote("bbb", T0 + timedelta(hours=1)), None, pull_mode="confirm")
-    assert d.kind == "pull_update" and not d.auto
+def test_no_baseline_remote_newer_with_different_hash_always_asks():
+    # ambiguous (no history): asked even when downloads are automatic
+    d = decide(local("aaa", T0), remote("bbb", T0 + timedelta(hours=1)), None, pull_mode="auto")
+    assert d.kind == "pull_update" and not d.auto and d.reason
+
+
+def test_only_remote_changed_downloads_automatically_by_default():
+    d = decide(local("aaa"), remote(t=T0 + timedelta(minutes=5)), base("aaa", T0))
+    assert d.kind == "pull_update" and d.auto
 
 
 # --- both sides, with history ---------------------------------------------

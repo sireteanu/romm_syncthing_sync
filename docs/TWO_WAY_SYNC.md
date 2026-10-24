@@ -30,18 +30,22 @@ On the next sync each side is compared to its baseline:
 
 | Local | RomM | Baseline | Result |
 |---|---|---|---|
-| ✓ | — | none | `push_new`. Asks unless `PUSH_NEW_MODE=auto` |
+| ✓ | — | none | `push_new`: automatic (asks only with `PUSH_NEW_MODE=confirm`) |
 | ✓ | — | exists | `push_new`, always asks (probably deleted on RomM) |
-| — | ✓ | none | `pull_new`. Asks unless `PULL_MODE=auto`; skipped if `off` |
+| — | ✓ | none | `pull_new`: automatic (asks with `PULL_MODE=confirm`; skipped if `off`) |
 | — | ✓ | exists | `pull_new`, always asks (probably deleted locally) |
 | ✓ | ✓ | any | same content hash → in sync (baseline recorded) |
-| ✓ | ✓ | none | local newer → upload. RomM newer with a different hash → `pull_update`. Otherwise assume in sync. (This is the upgrade path from 1.x.) |
+| ✓ | ✓ | none | local newer → upload. RomM newer with a different hash → `pull_update`, **always asks** (no history, so it's unclear which copy has your progress). Otherwise assume in sync. (This is the upgrade path from 1.x.) |
 | ✓ | ✓ | exists | nothing changed → nothing to do |
 | ✓ | ✓ | exists | only local changed → upload automatically |
-| ✓ | ✓ | exists | only RomM changed → `pull_update` (`PULL_MODE`) |
+| ✓ | ✓ | exists | only RomM changed → download automatically (`PULL_MODE`) |
 | ✓ | ✓ | exists | both changed → **conflict**, always asks |
 
 `FORCE_PUSH_SYNC=true` turns every differing pair into an upload, as before.
+
+## Errors
+
+When a transfer fails, `explain_error()` turns the exception into a sentence you can act on: token permissions, read-only or full disk, RomM unreachable or timing out, file too large, missing game, or RomM server errors. It's shown on the dashboard's **Errors** tab and stays there until that file syncs successfully, you dismiss it, or you click **Retry all**.
 
 ## Safety rails
 

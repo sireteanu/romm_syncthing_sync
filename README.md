@@ -17,7 +17,7 @@ A utility for syncing emulator save files and save states across your gaming dev
   - every game with its RomM cover art and the latest save-state screenshot (from RomM, or RetroArch's local `.png`)
   - an activity log
 - **RomM → folder sync.** Saves and states that are new or newer on RomM (from another device, the web player, Grout…) can be written back into your Syncthing folder. Syncthing then delivers them to your handhelds.
-- **Approvals.** By default nothing new crosses in either direction until you click **Upload** / **Download** in the dashboard. A confirmation box shows exactly what will happen. You can also switch either direction to fully automatic.
+- **Asks only when it's unclear.** Everything syncs automatically in both directions. You're only asked when a file changed on both sides, went missing on one side, or two different copies exist with no history. Each question explains why, and failures are listed with a plain-language reason.
 - **Conflict handling.** If a file changed on *both* sides since the last sync, nothing is overwritten. The dashboard shows the two versions side by side (time, size, hash, screenshot) and you choose:
   - **keep the folder version**
   - **keep the RomM version**
@@ -69,13 +69,16 @@ Gaming Devices (RetroArch, etc.)
 
 ### What gets synced automatically and what asks first
 
-| Situation | Default | Setting |
+| Situation | What happens | Setting |
 |---|---|---|
-| A file you already synced changed **only locally** | Uploaded automatically (original behaviour) | — |
-| A **new** local file RomM has never seen | Asks first | `PUSH_NEW_MODE=confirm\|auto` |
-| A file is **new or newer on RomM** | Asks first | `PULL_MODE=confirm\|auto\|off` |
-| A file changed **on both sides** | Always asks: conflict | `FORCE_PUSH_SYNC=true` makes local always win |
-| A file was **deleted** on one side | Asks first, never automatic | — |
+| A file changed **only locally** since the last sync | Uploaded automatically | — |
+| A **new** local file RomM has never seen | Uploaded automatically | `PUSH_NEW_MODE=auto\|confirm` |
+| A file is **new or changed on RomM** only | Downloaded automatically | `PULL_MODE=auto\|confirm\|off` |
+| A file changed **on both sides** | **Asks**: conflict | `FORCE_PUSH_SYNC=true` makes local always win |
+| A previously synced file is **missing on one side** | **Asks** (might be a deliberate delete) | — |
+| Both copies exist and **differ, with no sync history** yet, and RomM's is newer | **Asks** (unclear which has your progress) | — |
+
+Every question shows *why* it's being asked. Files that fail to sync appear under **Errors** with a plain explanation (for example "the API token lacks permission to write saves", "the sync folder is read-only", "RomM rejected the file as too large"), plus **Retry**/**Dismiss** buttons. They clear themselves once they sync.
 
 If you skip an item, you won't be asked about it again until one of the two copies changes.
 
@@ -195,8 +198,8 @@ A full sync now fetches all saves and states in two API calls instead of two per
 
 | Variable | Default | |
 |---|---|---|
-| `PUSH_NEW_MODE` | confirm | new local files → RomM: `confirm` or `auto` |
-| `PULL_MODE` | confirm | RomM → folder: `confirm`, `auto` or `off` |
+| `PUSH_NEW_MODE` | auto | new local files → RomM: `auto` or `confirm` (ask for every new file) |
+| `PULL_MODE` | auto | RomM → folder: `auto`, `confirm` or `off` |
 | `BACKUP_RETENTION_DAYS` | 30 | keep backups of overwritten files this long (`0` = forever) |
 | `DATA_FOLDER` → `/data` | `./data` | sync history, pending approvals, backups. **Keep this persistent**, it's how changes on each side are told apart |
 | `PUID` / `PGID` | — | owner of files written into the sync folders (Unraid: `99` / `100`) |

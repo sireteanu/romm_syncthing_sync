@@ -46,8 +46,8 @@ class Config:
                  log_level: str = os.getenv("LOG_LEVEL", "INFO"),
                  dry_run: bool = os.getenv("DRY_RUN", "false").lower() == "true",
                  enable_metrics: bool = os.getenv("ENABLE_METRICS", "false").lower() == "true",
-                 push_new_mode: str = os.getenv("PUSH_NEW_MODE", "confirm").lower(),
-                 pull_mode: str = os.getenv("PULL_MODE", "confirm").lower(),
+                 push_new_mode: str = os.getenv("PUSH_NEW_MODE", "auto").lower(),
+                 pull_mode: str = os.getenv("PULL_MODE", "auto").lower(),
                  romm_poll_interval_seconds: int = int(os.getenv("ROMM_POLL_INTERVAL_SECONDS", "600")),
                  web_ui: bool = os.getenv("WEB_UI", "true").lower() == "true",
                  web_port: int = int(os.getenv("WEB_PORT", "8080")),
@@ -85,10 +85,10 @@ class Config:
         # Two-way sync / approval settings
         # PUSH_NEW_MODE: what to do with a local save/state that RomM has never seen.
         #   confirm (default) -> queue it in the GUI for approval; auto -> upload right away (old behaviour)
-        self.PUSH_NEW_MODE: str = push_new_mode if push_new_mode in ("confirm", "auto") else "confirm"
+        self.PUSH_NEW_MODE: str = push_new_mode if push_new_mode in ("confirm", "auto") else "auto"
         # PULL_MODE: RomM -> sync folder ("reverse sync").
         #   off -> never write to the sync folder; confirm (default) -> queue in GUI; auto -> download right away
-        self.PULL_MODE: str = pull_mode if pull_mode in ("off", "confirm", "auto") else "confirm"
+        self.PULL_MODE: str = pull_mode if pull_mode in ("off", "confirm", "auto") else "auto"
         # Watch mode only sees local file events, so RomM-side changes are found by polling.
         self.ROMM_POLL_INTERVAL_SECONDS: int = romm_poll_interval_seconds
 

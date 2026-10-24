@@ -112,22 +112,24 @@ class Decision:
 
 
 def decide(local: Optional[LocalFile], remote: Optional[dict], baseline: Optional[dict],
-           push_new_mode: str = "confirm", pull_mode: str = "confirm", force: bool = False) -> Decision:
+           push_new_mode: str = "auto", pull_mode: str = "auto", force: bool = False) -> Decision:
     """Pure decision function — see module docstring. Kept free of I/O so it is easy to test."""
     pull_on = pull_mode != "off"
     pull_auto = pull_mode == "auto"
 
     if local and not remote:
         if baseline and baseline.get("romm_id"):
-            return Decision("push_new", False, "Was synced before but is no longer on RomM (deleted there?)")
-        return Decision("push_new", push_new_mode == "auto", "Not on RomM yet")
+            return Decision("push_new", False, "This file was synced before but is now missing on RomM. "
+                                               "Upload it again, or skip if it was deleted on purpose.")
+        return Decision("push_new", push_new_mode == "auto", "New in your sync folder; not on RomM yet.")
 
     if remote and not local:
         if not pull_on:
             return Decision(None)
         if baseline:
-            return Decision("pull_new", False, "Was synced before but is missing from the sync folder (deleted locally?)")
-        return Decision("pull_new", pull_auto, "On RomM but not in the sync folder")
+            return Decision("pull_new", False, "This file was synced before but is now missing from your sync folder. "
+                                               "Download it again, or skip if it was deleted on purpose.")
+        return Decision("pull_new", pull_auto, "On RomM but not in your sync folder yet.")
 
     if not local and not remote:
         return Decision(None)
@@ -147,7 +149,10 @@ def decide(local: Optional[LocalFile], remote: Optional[dict], baseline: Optiona
         if r_time is None or local.mtime > r_time:
             return Decision("push_update", True, "Local copy is newer")
         if r_hash and pull_on:  # RomM 5.x saves: we *know* contents differ and RomM is newer
-            return Decision("pull_update", pull_auto, "RomM copy is newer")
+            # Ambiguous: no sync history, so we can't tell which copy holds the real progress. Always ask.
+            return Decision("pull_update", False, "Both copies exist but are different, and there's no sync history "
+                                                  "for this file yet, so it isn't clear which one has your latest "
+                                                  "progress. RomM's copy is newer.")
         return Decision("adopt", True, "Assumed in sync (no previous sync record)")
 
     local_changed = local.hash != baseline.get("local_hash")
@@ -163,8 +168,9 @@ def decide(local: Optional[LocalFile], remote: Optional[dict], baseline: Optiona
     if remote_changed and not local_changed:
         if not pull_on:
             return Decision(None)
-        return Decision("pull_update", pull_auto, "Changed on RomM since last sync")
-    return Decision("conflict", False, "Changed both locally and on RomM since last sync")
+        return Decision("pull_update", pull_auto, "Changed on RomM since the last sync.")
+    return Decision("conflict", False, "Changed both in your sync folder and on RomM since the last sync, "
+                                       "so either version could be the one you want.")
 
 
 class SyncEngine:
@@ -289,6 +295,7 @@ class SyncEngine:
 
             action = self._build_action(d, game, ft, name, lf, rf)
             if d.auto:
+                STATE.drop_pending_for_key(key)  # e.g. queued by an older "confirm" setting
                 ok, msg = self.execute(action)
                 file_status[f"{ft}:{name}"] = "synced" if ok else "error"
                 if ok:
@@ -388,16 +395,20 @@ class SyncEngine:
                 else:
                     raise ValueError(f"Unknown action {action.kind}")
                 logger.info(f"✔ {msg}")
+                STATE.clear_error(action.key)
                 STATE.finish_action(action, "done", msg)
                 return True, msg
             except StaleAction as e:
+                STATE.clear_error(action.key)
                 STATE.finish_action(action, "stale", str(e))
                 logger.warning(f"Skipped {action.file_name}: {e}")
                 return False, str(e)
             except Exception as e:
-                STATE.finish_action(action, "failed", str(e))
-                logger.error(f"✘ {action.kind} {action.file_name} failed: {e}")
-                return False, str(e)
+                msg = explain_error(e, action)
+                STATE.finish_action(action, "failed", msg)
+                STATE.record_error(action, msg, detail=str(e))
+                logger.error(f"✘ {action.kind} {action.file_name} failed: {msg}")
+                return False, msg
 
     def _check_local_unchanged(self, action: PendingAction) -> Path:
         p = Path(action.local_path)
@@ -579,6 +590,38 @@ class SyncEngine:
             "checked_at": utcnow_iso(),
         }
     # endregion
+
+
+def explain_error(e: Exception, action: PendingAction) -> str:
+    """Turn an exception into a sentence a person can act on."""
+    import requests
+    text = str(e)
+    where = "RomM" if action.kind.startswith("push") or action.kind == "conflict" else "your sync folder"
+    if isinstance(e, PermissionError) or "Permission denied" in text or "Read-only file system" in text:
+        return ("Couldn't write to your sync folder (permission denied / read-only). Make sure the saves and "
+                "states folders are mounted read-write (no ':ro') and that PUID/PGID can write there.")
+    if isinstance(e, OSError) and "No space left" in text:
+        return "The disk is full, so the file couldn't be written."
+    if isinstance(e, requests.exceptions.ConnectionError) or "Can't reach RomM" in text:
+        return f"Couldn't reach RomM at {get_config().ROMM_CREDENTIALS.url}. It will be retried on the next sync."
+    if isinstance(e, requests.exceptions.Timeout):
+        return "RomM took too long to respond. It will be retried on the next sync."
+    m = re.search(r"RomM returned (\d{3})", text) or re.search(r"(\d{3}) (?:Client|Server) Error", text)
+    code = int(m.group(1)) if m else None
+    if code in (401, 403):
+        return ("RomM refused this request. The API token probably lacks permission to "
+                + ("write saves/states (assets.write)." if where == "RomM" else "read saves/states (assets.read)."))
+    if code == 404:
+        return "RomM couldn't find this game or file any more (it may have been removed from RomM)."
+    if code == 413:
+        return "RomM rejected the file as too large. Check the upload size limit of RomM or your reverse proxy."
+    if code == 409:
+        return "RomM reported a conflict with an existing file. It will be re-checked on the next sync."
+    if code and code >= 500:
+        return f"RomM had an internal error ({code}). Check RomM's logs; it will be retried on the next sync."
+    if "back up" in text:
+        return "Couldn't make a backup of the RomM copy first, so nothing was overwritten. " + text
+    return text
 
 
 class StaleAction(Exception):

@@ -120,6 +120,7 @@ class AppState:
         # Decisions
         self.pending: Dict[str, PendingAction] = {}   # action id -> action
         self.history: deque = deque(maxlen=self.MAX_HISTORY)
+        self.errors: Dict[str, dict] = {}   # file key -> latest failure (cleared when that file syncs)
 
         # Baselines (persisted)
         self.baselines: Dict[str, dict] = {}
@@ -279,6 +280,20 @@ class AppState:
             self.history.appendleft(action.to_dict() | {"finished_at": utcnow_iso()})
         self.save()
 
+    def record_error(self, action: "PendingAction", message: str, detail: str = ""):
+        with self.lock:
+            prev = self.errors.get(action.key, {})
+            self.errors[action.key] = {
+                "key": action.key, "game": action.game, "platform": action.platform,
+                "file_name": action.file_name, "file_type": action.file_type, "kind": action.kind,
+                "message": message, "detail": detail if detail != message else "",
+                "at": utcnow_iso(), "count": prev.get("count", 0) + 1,
+            }
+
+    def clear_error(self, key: str):
+        with self.lock:
+            self.errors.pop(key, None)
+
     def pending_list(self) -> List[dict]:
         with self.lock:
             return [a.to_dict() for a in sorted(self.pending.values(), key=lambda a: a.created_at)]
@@ -335,6 +350,7 @@ class AppState:
                 "systems": sorted(systems.values(), key=lambda s: s["display_name"].lower()),
                 "games": sorted(games, key=lambda g: (g["platform"].lower(), g["name"].lower())),
                 "pending": pending,
+                "errors": sorted(self.errors.values(), key=lambda e: e["at"], reverse=True),
                 "history": list(self.history)[:30],
                 "activity": list(self.activity)[-120:],
             }
