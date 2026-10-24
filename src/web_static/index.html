@@ -243,6 +243,8 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
 .inp{background:var(--surface-2);border:1px solid var(--line-strong);color:var(--text);border-radius:8px;padding:7px 10px;font:inherit;font-size:13px;width:100%}
 .inp:focus{outline:2px solid var(--accent);outline-offset:-1px}
 .inp.num{width:120px}
+/* Windows draws the dropdown list with a white background; give options solid theme colours */
+select option,select optgroup{background:var(--panel);color:var(--text)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .chan{border:1px solid var(--line);border-radius:var(--r-md);padding:12px;margin-bottom:10px;background:var(--surface-2)}
 .chan .inp{background:var(--surface)}
