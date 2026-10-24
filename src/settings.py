@@ -37,6 +37,11 @@ FIELDS: Dict[str, dict] = {
     "BACKUP_RETENTION_DAYS": {"type": "int", "min": 0, "max": 3650, "unit": "days", "group": "backups",
                               "label": "Keep backups of overwritten files for",
                               "help": "0 = keep forever. Backups are in /data/backups."},
+    "FILE_MODE": {"type": "choice", "choices": [0o777, 0o666, 0o775, 0o664], "group": "backups",
+                  "labels": {"511": "0777", "438": "0666", "509": "0775", "436": "0664"},
+                  "label": "Permissions for files written to your sync folders",
+                  "help": "0777 (default) = everyone can read and write, the usual choice on Unraid shares. "
+                          "0666 = the same without the executable bit."},
     "WEB_USERNAME": {"type": "str", "group": "access", "label": "Dashboard username",
                      "help": "Set both username and password to require a login. Clear both to turn it off."},
     "WEB_PASSWORD": {"type": "secret", "group": "access", "label": "Dashboard password", "help": ""},
@@ -108,8 +113,13 @@ def apply_to_config(cfg):
 def validate(key: str, value: Any):
     spec = FIELDS[key]
     if spec["type"] == "choice":
+        if spec["choices"] and isinstance(spec["choices"][0], int):
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                pass
         if value not in spec["choices"]:
-            raise ValueError(f"{spec['label']}: must be one of {', '.join(spec['choices'])}")
+            raise ValueError(f"{spec['label']}: must be one of {', '.join(map(str, spec['choices']))}")
         return value
     if spec["type"] == "int":
         try:

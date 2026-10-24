@@ -221,7 +221,8 @@ class SyncOrchestrator:
                     return result
 
                 summary = SyncEngine().reconcile(games_to_sync, srv=self.srv, discover_remote=False,
-                                                 force=self.app_cfg.FORCE_PUSH_SYNC)
+                                                 force=self.app_cfg.FORCE_PUSH_SYNC,
+                                                 all_games=list(self.lcl.games.values()))
                 result.games_synced = games_to_sync
                 result.success = summary["errors"] == 0
                 result.stats = summary

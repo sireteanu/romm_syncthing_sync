@@ -100,6 +100,11 @@ class Config:
         self.WEB_PASSWORD: str = web_password
 
         # File ownership for files written into the sync folders (Unraid: nobody/users = 99/100)
+        # Permissions for files/folders written into the sync folders and backups (octal, default 0777).
+        try:
+            self.FILE_MODE: int = int(str(os.getenv("FILE_MODE", "0777")).strip(), 8)
+        except ValueError:
+            self.FILE_MODE = 0o777
         self.PUID: int | None = int(puid) if str(puid).strip().isdigit() else None
         self.PGID: int | None = int(pgid) if str(pgid).strip().isdigit() else None
 

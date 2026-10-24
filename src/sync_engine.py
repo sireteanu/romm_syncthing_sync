@@ -261,7 +261,21 @@ class SyncEngine:
             for item in self.romm.list_all(KIND_API[ft]):
                 if CONFLICT_MARKER in item.get("file_name", ""):
                     continue  # conflict copies we created are archive-only
+                item["_api"] = KIND_API[ft]  # which RomM list it lives in (used for updates/downloads)
                 out[ft].setdefault(item["rom_id"], []).append(item)
+        return out
+
+    @classmethod
+    def _remote_for_rom(cls, remote, rom_id: int, rom_row: Optional[dict]) -> Dict[str, Dict[str, dict]]:
+        """RomM files for one ROM as {"save": {name: item}, "state": {name: item}}, classified by the name they
+        get in the sync folder, not by which RomM list they're in: other clients sometimes upload states
+        ("Game.state1") to RomM's saves list. The newest item wins when several map to the same name."""
+        from .library_classes import LibraryScanner
+        items = list(remote["save"].get(rom_id, [])) + list(remote["state"].get(rom_id, []))
+        out: Dict[str, Dict[str, dict]] = {"save": {}, "state": {}}
+        for name, it in cls._latest_by_name(items, rom_row).items():
+            _, ftype = LibraryScanner.parse_save_filename(name)
+            out["state" if ftype in ("state", "state_screen") else "save"][name] = it
         return out
 
     @staticmethod
@@ -291,7 +305,8 @@ class SyncEngine:
         return out
     # endregion
 
-    def reconcile(self, games: List[Game], srv=None, discover_remote: bool = False, force: bool = False) -> dict:
+    def reconcile(self, games: List[Game], srv=None, discover_remote: bool = False, force: bool = False,
+                  all_games: Optional[List[Game]] = None) -> dict:
         """Compare local vs RomM for the given games; run automatic actions, queue the rest."""
         summary = {"pushed": 0, "pulled": 0, "queued": 0, "conflicts": 0, "in_sync": 0, "errors": 0, "unmatched": 0}
         pull_mode = self.pull_mode
@@ -314,6 +329,10 @@ class SyncEngine:
 
         self._claimed: Dict[str, str] = {}  # file key -> "platform folder" that owns it in this run
         self._evaluated: set = set()         # file keys looked at in this run
+        self._local_names: Dict[str, set] = {}  # platform folder -> local game names (incl. unmatched)
+        for g in (all_games if all_games is not None else games):
+            self._local_names.setdefault(g.platform.lower(), set()).add(g.name)
+
         if discover_remote:  # full sync: duplicate warnings are re-detected from scratch
             with STATE.lock:
                 for k in [k for k in STATE.errors if k.startswith("dup:")]:
@@ -353,7 +372,9 @@ class SyncEngine:
     def _reconcile_game(self, game: Game, remote, pull_mode, force, summary):
         local = self.local_files(game)
         file_status: Dict[str, str] = {}
-        remote_by_type = {ft: self._latest_by_name(remote[ft].get(game.romm_id, []), game.romm_row) for ft in ("save", "state")}
+        remote_by_type = self._remote_for_rom(remote, game.romm_id, game.romm_row)
+        from .library_classes import LibraryScanner
+        other_local = self._local_names.get(game.platform.lower(), set()) - {game.name}
 
         names = set(local.keys())
         for ft in ("save", "state"):
@@ -362,6 +383,13 @@ class SyncEngine:
         for (ft, name) in sorted(names):
             lf = local.get((ft, name))
             rf = remote_by_type[ft].get(name)
+            if rf is not None and lf is None:
+                owner_name, _ = LibraryScanner.parse_save_filename(name)
+                if owner_name in other_local:
+                    # e.g. "Fallen.state.auto" attached to the "Fallen Angel" ROM by an older version: that file
+                    # belongs to the local game "Fallen", so never download it as part of this game.
+                    logger.debug(f"Ignoring RomM file {name} on {game.name}: it belongs to local game {owner_name}")
+                    continue
             key = file_key(ft, game.romm_id, name)
             self._evaluated.add(key)
 
@@ -431,29 +459,39 @@ class SyncEngine:
             romm_updated_at=rf.get("updated_at") if rf else None,
             romm_hash=rf.get("content_hash") if rf else None,
             romm_screenshot=shot.get("download_path") if isinstance(shot, dict) else None,
+            romm_api=rf.get("_api") if rf else None,
             reason=d.reason,
         )
 
     def _discover_remote_only(self, remote, seen_rom_ids, srv, pull_mode, summary):
         """Saves/states on RomM for games that have nothing in the sync folder yet."""
         rows = {r["id"]: r for r in srv.library}
+        folders_by_type = {}
         for ft in ("save", "state"):
-            sync_root = self.cfg.sync_dir_for(ft)
-            if sync_root is None or not sync_root.exists():
+            root = self.cfg.sync_dir_for(ft)
+            folders_by_type[ft] = [p for p in root.iterdir() if p.is_dir()] if root is not None and root.exists() else []
+        for rom_id in sorted(set(remote["save"]) | set(remote["state"])):
+            if rom_id in seen_rom_ids or rom_id not in rows:
                 continue
-            folders = [p for p in sync_root.iterdir() if p.is_dir()]
-            for rom_id, items in remote[ft].items():
-                if rom_id in seen_rom_ids or rom_id not in rows:
-                    continue
-                row = rows[rom_id]
-                folder = next((f for f in folders if srv.local_folder_matches_slug(f.name, row["platform_slug"])), None)
+            row = rows[rom_id]
+            files = self._remote_for_rom(remote, rom_id, row)
+            game_name = row.get("fs_name_no_ext") or Path(row["fs_name"]).stem
+            shown = None
+            for ft in ("save", "state"):
+                folder = next((f for f in folders_by_type[ft] if srv.local_folder_matches_slug(f.name, row["platform_slug"])), None)
                 if folder is None:
-                    logger.debug(f"No local folder for platform '{row['platform_slug']}' — can't place {row['name']} saves.")
+                    if files[ft]:
+                        logger.debug(f"No local folder for platform '{row['platform_slug']}' — can't place {row['name']} {ft}s.")
                     continue
-                game_name = row.get("fs_name_no_ext") or Path(row["fs_name"]).stem
                 game = Game(name=game_name, path=folder / game_name, platform=folder.name)
                 game.set_romm_data(row)
-                for name, rf in self._latest_by_name(items, row).items():
+                shown = shown or game
+                for name, rf in files[ft].items():
+                    if (folder / name).exists():
+                        # Already in the sync folder under another ROM (e.g. a copy an older version attached to
+                        # "(Disc 1)" while your save syncs with the multi-disc ROM). Never overwrite it from here.
+                        logger.debug(f"Skipping {name} from RomM ROM #{rom_id}: that file already exists locally")
+                        continue
                     key = file_key(ft, rom_id, name)
                     self._evaluated.add(key)
                     d = decide(None, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode)
@@ -466,11 +504,10 @@ class SyncEngine:
                     elif not STATE.is_dismissed(key, action.kind, None, action.romm_updated_at):
                         STATE.queue(action, persist=False)
                         summary["queued"] += 1
-                snap = self.snapshot(game, {ft: self._latest_by_name(items, row)}, {}, error=None)
+            if shown is not None and STATE.games.get(f"{shown.platform}/{shown.name}") is None:
+                snap = self.snapshot(shown, files, {}, error=None)
                 snap["status"] = "romm-only"
-                existing = STATE.games.get(f"{game.platform}/{game.name}")
-                if existing is None:
-                    STATE.update_game(snap)
+                STATE.update_game(snap)
 
     # region execution
     def execute(self, action: PendingAction, choice: Optional[str] = None) -> Tuple[bool, str]:
@@ -523,7 +560,7 @@ class SyncEngine:
 
     def _check_remote_unchanged(self, action: PendingAction) -> dict:
         import requests
-        url = f"{self.romm.url}/api/{KIND_API[action.file_type]}/{action.romm_id}"
+        url = f"{self.romm.url}/api/{action.romm_api or KIND_API[action.file_type]}/{action.romm_id}"
         r = requests.get(url, timeout=30, **self.romm._auth_kwargs())
         if r.status_code == 404:
             raise StaleAction("RomM copy no longer exists")
@@ -535,7 +572,8 @@ class SyncEngine:
 
     def _push(self, action: PendingAction) -> str:
         path = self._check_local_unchanged(action)
-        kind = KIND_API[action.file_type]
+        # updates go back to the RomM list the file is in; new files go to the list for their type
+        kind = (action.romm_api or KIND_API[action.file_type]) if action.romm_id else KIND_API[action.file_type]
         screenshot = Path(action.local_screenshot) if action.local_screenshot else None
         if self.cfg.DRY_RUN:
             return f"[dry run] would upload {path.name}"
@@ -559,7 +597,11 @@ class SyncEngine:
                 raise ValueError(f"Refusing unsafe file name {action.file_name!r}")
         if self.cfg.DRY_RUN:
             return f"[dry run] would download {dest.name}"
-        content = self.romm.download_asset(KIND_API[action.file_type], item)
+        if action.kind == "pull_new" and dest.exists():
+            # We expected no local file. Something else owns this name; never overwrite it.
+            raise StaleAction(f"{dest.name} already exists in your sync folder, so it wasn't overwritten. "
+                              "It will be re-checked on the next sync.")
+        content = self.romm.download_asset(action.romm_api or KIND_API[action.file_type], item)
         if dest.exists():
             self._backup_local(dest, action.platform)
         self._write_local(dest, content, parse_dt(item.get("updated_at")))
@@ -594,38 +636,60 @@ class SyncEngine:
     # backups
     def _backup_dir(self, platform: str) -> Path:
         d = data_dir() / "backups" / datetime.now().strftime("%Y-%m-%d") / platform
-        d.mkdir(parents=True, exist_ok=True)
+        self._make_dirs(d, stop_at=data_dir())
         return d
 
     def _backup_local(self, path: Path, platform: str):
         dst = self._backup_dir(platform) / f"{datetime.now().strftime('%H%M%S')}-local-{path.name}"
         shutil.copy2(path, dst)
+        self._fix_perms(dst)
         logger.info(f"Backed up local {path.name} → {dst}")
 
     def _backup_remote(self, action: PendingAction):
         if not action.romm_id or self.cfg.DRY_RUN:
             return
         try:
-            content = self.romm.download_asset(KIND_API[action.file_type], {"id": action.romm_id})
+            content = self.romm.download_asset(action.romm_api or KIND_API[action.file_type], {"id": action.romm_id})
             dst = self._backup_dir(action.platform) / f"{datetime.now().strftime('%H%M%S')}-romm-{action.file_name}"
             dst.write_bytes(content)
+            self._fix_perms(dst)
             logger.info(f"Backed up RomM copy of {action.file_name} → {dst}")
         except Exception as e:
             # Don't overwrite something we couldn't back up.
             raise RuntimeError(f"Could not back up the RomM copy before overwriting it: {e}")
 
+    def _fix_perms(self, path: Path, is_dir: bool = False):
+        """Unraid-friendly ownership and permissions (FILE_MODE, default 0777) so Syncthing, SMB shares and
+        your devices can all read and write what this app creates."""
+        try:
+            os.chmod(path, self.cfg.FILE_MODE)
+        except OSError as e:
+            logger.debug(f"Couldn't chmod {path}: {e}")
+        if self.cfg.PUID is not None and self.cfg.PGID is not None:
+            try:
+                os.chown(path, self.cfg.PUID, self.cfg.PGID)
+            except OSError:
+                pass
+
+    def _make_dirs(self, d: Path, stop_at: Optional[Path] = None):
+        """mkdir -p, applying permissions to every folder this app creates (not to existing ones)."""
+        missing = []
+        p = d
+        while not p.exists() and p != p.parent and p != stop_at:
+            missing.append(p)
+            p = p.parent
+        d.mkdir(parents=True, exist_ok=True)
+        for m in reversed(missing):
+            self._fix_perms(m, is_dir=True)
+
     def _write_local(self, dest: Path, content: bytes, mtime: Optional[datetime]):
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        self._make_dirs(dest.parent)
         tmp = dest.with_name(f".{dest.name}.romm_sync.tmp")
         tmp.write_bytes(content)
         if mtime:
             ts = mtime.timestamp()
             os.utime(tmp, (ts, ts))
-        if self.cfg.PUID is not None and self.cfg.PGID is not None:
-            try:
-                os.chown(tmp, self.cfg.PUID, self.cfg.PGID)
-            except PermissionError:
-                pass
+        self._fix_perms(tmp)
         os.replace(tmp, dest)
     # endregion
 

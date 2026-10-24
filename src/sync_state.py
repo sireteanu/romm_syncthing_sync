@@ -71,6 +71,7 @@ class PendingAction:
     romm_updated_at: Optional[str] = None
     romm_hash: Optional[str] = None
     romm_screenshot: Optional[str] = None   # RomM download_path of the state screenshot
+    romm_api: Optional[str] = None          # RomM list the file is in ("saves"/"states"); may differ from file_type
     reason: str = ""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     created_at: str = field(default_factory=utcnow_iso)

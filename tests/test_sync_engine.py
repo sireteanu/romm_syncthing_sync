@@ -306,3 +306,51 @@ def test_state_and_state0_are_both_kept(tmp_path):
     lib.build_local_library()
     (game,) = lib.games.values()
     assert len(game.local_state_files) == 2
+
+
+# --- regressions from a real RomM 5.4 library -------------------------------------------
+def test_exact_name_wins_rom_over_prefix_match():
+    from src.games_class import Game
+    lib = SimpleNamespace(library=[{"id": 81, "fs_name": "Fallen Angel.crt", "fs_name_no_ext": "Fallen Angel",
+                                    "platform_slug": "c64", "name": "Fallen Angel", "platform_id": 8, "fs_size_bytes": 1}],
+                          get_romm_platform=lambda folder: "c64")
+    fallen = Game(name="Fallen", path=Path("/x"), platform="c64")
+    angel = Game(name="Fallen Angel", path=Path("/x"), platform="c64")
+    LibraryScanner.match_to_romm([fallen, angel], lib)   # order must not matter
+    assert angel.romm_id == 81 and not fallen.is_matched
+
+
+def test_states_in_romms_saves_list_are_classified_by_name():
+    from src.sync_engine import SyncEngine
+    row = {"fs_name": "Mario's Picross (USA, Europe).gb", "fs_name_no_ext": "Mario's Picross (USA, Europe)"}
+    remote = {"save": {71: [{"id": 1, "file_name": "Mario's Picross (USA, Europe).state1", "updated_at": T0.isoformat(), "_api": "saves"},
+                            {"id": 2, "file_name": "Mario's Picross (USA, Europe).srm", "updated_at": T0.isoformat(), "_api": "saves"}]},
+              "state": {}}
+    out = SyncEngine._remote_for_rom(remote, 71, row)
+    assert set(out["state"]) == {"Mario's Picross (USA, Europe).state1"}
+    assert out["state"]["Mario's Picross (USA, Europe).state1"]["_api"] == "saves"  # updates go back to that list
+    assert set(out["save"]) == {"Mario's Picross (USA, Europe).srm"}
+
+
+def test_written_files_and_new_folders_get_file_mode(tmp_path, monkeypatch):
+    import stat
+    from src.sync_engine import SyncEngine
+    eng = SyncEngine.__new__(SyncEngine)
+    eng.cfg = SimpleNamespace(FILE_MODE=0o777, PUID=None, PGID=None)
+    old_umask = os.umask(0o022)
+    try:
+        dest = tmp_path / "saves" / "newsys" / "Game (USA).srm"
+        eng._write_local(dest, b"data", None)
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(dest.stat().st_mode) == 0o777
+    assert stat.S_IMODE(dest.parent.stat().st_mode) == 0o777
+
+
+def test_file_mode_setting_accepts_numeric_choice():
+    cfg = _cfg()
+    cfg.FILE_MODE = 0o777
+    st.apply_to_config(cfg)
+    st.update(cfg, {"FILE_MODE": "438"}, [])
+    assert cfg.FILE_MODE == 0o666
+    st.update(cfg, {}, ["FILE_MODE"])

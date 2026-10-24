@@ -45,6 +45,11 @@ def main(root: Path):
         # folder-name variants for the Platforms page
         (sv / "megadrive/Comet Courier (USA).srm", b"comet-save", old),   # RomM built-in alias -> genesis
         (sv / "GameBoy Color/Prism Quest (USA).srm", b"prism-save", old),     # not mapped
+        # regression scenarios (see tests/mock_romm.py)
+        (sv / "saturn/Panzer Dragoon Saga (USA).bkr", b"panzer-current", old),
+        (st / "gb/Mario's Picross (USA, Europe).state1", b"picross-slot1", old),
+        (st / "c64/Fallen Angel.state.auto", b"fallen-angel", old),
+        (st / "c64/Fallen.state.auto", b"fallen-stray", old),
     ]
     for p, data, when in files:
         write(p, data, when)
@@ -54,6 +59,8 @@ def main(root: Path):
                      (st / "snes/Starfall Odyssey (USA).state1.png", PLATFORMS[1][2])]:
         write(p, _art(p.name + "local", 320, 240, color, "shot"), recent)
     (st / "gba").mkdir(parents=True, exist_ok=True)
+    (sv / "gb").mkdir(parents=True, exist_ok=True)
+    (st / "saturn").mkdir(parents=True, exist_ok=True)
 
     def md5(b):
         return hashlib.md5(b).hexdigest()

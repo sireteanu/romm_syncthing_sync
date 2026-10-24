@@ -935,7 +935,7 @@ function fieldHTML(f){
   const v = f.key in sv.edits ? sv.edits[f.key] : f.value;
   const src = sv.reset.has(f.key) ? "" : f.source==="dashboard" ? `<span class="src dash">changed here</span> <button class="linkbtn" data-reset="${f.key}">reset to ${f.container_value!=null && f.type!=="secret" ? esc(String(f.container_value)) : "container value"}</button>` : f.source==="container" ? `<span class="src">from container</span>` : "";
   let ctl = "";
-  if (f.type === "choice") ctl = `<div class="seg-ctl" style="display:inline-flex">${f.choices.map(c=>`<button data-set="${f.key}" data-v="${c}" class="${v===c?"on":""}">${esc(MODE[c]||c)}</button>`).join("")}</div>`;
+  if (f.type === "choice") ctl = `<div class="seg-ctl" style="display:inline-flex">${f.choices.map(c=>`<button data-set="${f.key}" data-v="${c}" class="${String(v)===String(c)?"on":""}">${esc((f.labels&&f.labels[c])||MODE[c]||c)}</button>`).join("")}</div>`;
   else if (f.type === "int") ctl = `<div class="row"><input class="inp num" type="number" min="${f.min}" max="${f.max}" data-set="${f.key}" value="${esc(v)}"><span style="color:var(--muted);font-size:12.5px">${f.unit}${f.unit==="seconds"&&v?` (${secsHuman(v)})`:""}</span></div>`;
   else if (f.type === "secret") ctl = `<input class="inp" type="password" autocomplete="new-password" data-set="${f.key}" placeholder="${f.is_set?"•••••••• saved — type to change":"not set"}" value="${esc(sv.edits[f.key]||"")}">`;
   else ctl = `<input class="inp" type="text" autocomplete="off" data-set="${f.key}" value="${esc(v||"")}">`;
@@ -946,7 +946,7 @@ function renderSettings(){
   const by = g => d.fields.filter(f=>f.group===g).map(fieldHTML).join("");
   $("#set-sync").innerHTML = `<h3>Sync behaviour</h3><p>Everything syncs automatically; you're only asked when it's unclear (conflicts, deletions, first-time mismatches).</p>${by("sync")}`;
   $("#set-timing").innerHTML = `<h3>Timing</h3><p>Current sync mode: <b>${esc(d.connection.sync_mode)}</b>.</p>${by("timing")}`;
-  $("#set-backups").innerHTML = `<h3>Backups</h3><p>Before any file is overwritten, the replaced version is copied to the backups folder.</p>${by("backups")}`;
+  $("#set-backups").innerHTML = `<h3>Files &amp; backups</h3><p>How files are written to your sync folders. Before any file is overwritten, the replaced version is copied to the backups folder.</p>${by("backups")}`;
   $("#set-access").innerHTML = `<h3>Dashboard access</h3><p>Optional login for this dashboard.</p>${by("access")}`;
   const c = d.connection;
   $("#set-conn").innerHTML = `<h3>Connection</h3><p>Set in the container (Unraid template / docker compose). Changing these needs a restart.</p>

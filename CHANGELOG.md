@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.6.1 — fixes for downloads that kept coming back
+
+### Fixed
+- **Saves were overwritten from the wrong ROM:** a stray copy of a save attached to another ROM (e.g. "(Disc 1)" while your save syncs with the multi-disc ROM) could be downloaded over your real save. Files that already exist locally are now never overwritten by the "games only on RomM" check. A "new file" download also refuses to replace a file it didn't expect.
+- **States in RomM's saves list never paired:** RomM files are now classified by name, so a `.state1` stored in RomM's *saves* list pairs with your local state. Updates go back to the list the file came from.
+- **Prefix matches stole ROMs:** each ROM is now claimed by one local game and exact names win, so "Fallen" no longer takes "Fallen Angel" (and "It's Magic" no longer takes "It's Magic II").
+- **Other games' files were pulled in:** RomM files belonging to another local game in the same folder are ignored instead of downloaded.
+
+### Added
+- Files and folders written to the sync folders (and backups) get permissions `0777` by default, so Syncthing, SMB shares and devices can read and write them. Configurable with `FILE_MODE` or on the Settings page (0777 / 0666 / 0775 / 0664).
+
 ## 2.6.0 — logs page, queue fixes
 
 ### Added

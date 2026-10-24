@@ -372,8 +372,9 @@ class LocalLibrary:
             file_info = games_dict[game_name]
             new_game = Game(name=game_name, path=file_info['path'], platform=file_info['platform'])
 
-            # Match to ROMM
-            LibraryScanner.match_to_romm([new_game], romm_library)
+            # Match to ROMM (ROMs already claimed by other local games are off limits)
+            LibraryScanner.match_to_romm([new_game], romm_library,
+                                         taken={g.romm_id for g in self.games.values() if g.is_matched})
 
             # Load local saves and states
             LibraryScanner._load_local_saves_and_states(g=new_game, file_info=file_info)
@@ -556,56 +557,62 @@ class LibraryScanner:
     # RomM - LocalLibrary interface
     @staticmethod
     def match_to_romm(games: List[Game],
-                      romm_library: RetroGameServer) -> None:
-        """Match local games to RetroGameServer library entries. Allows passing an arbitrary list of games for incremental state updates.
-        Uses platform information to narrow search space for efficiency.
-        Currently performs exact name matching within platform. Future enhancement: fuzzy matching.
+                      romm_library: RetroGameServer,
+                      taken: Optional[set] = None) -> None:
+        """Match local games to RomM ROMs, narrowed to the folder's platform.
+
+        Two passes so exact names always win: first every game whose name is exactly a ROM's file name,
+        then the rest by prefix (find_rom), never taking a ROM another local game in this batch (or in
+        `taken`) already claimed. So local "Fallen" can't grab "Fallen Angel" from local "Fallen Angel".
         """
+        taken = set(taken or ())
+        by_slug: Dict[Optional[str], List[dict]] = {}
+        plans = []
         for game in games:
-            # Narrow search to platform if available
-            if game.platform:
-
-                matched_romm_slug = romm_library.get_romm_platform(game.platform)
-                logger.debug(f"{game.name} -- Matched platform {game.platform} to slug {matched_romm_slug}.")
-                if matched_romm_slug is not None:
-                    platform_games = [g for g in romm_library.library if g['platform_slug'] == matched_romm_slug]
-                    # platform_games = romm_library.library.filter(
-                    #     pl.col('platform_slug') == matched_romm_slug
-                    # )
-                else:  # fallback to directly check romm slug vs detected game.platform
-                    platform_games = [g for g in romm_library.library if g['platform_slug'] == game.platform]
-                
-                # Logic here checks for a column match to *fs_name*, not "name" from romm's api output.
-                # This is because ROMM strips regions and rewrites the filename for a cleaned up name, while Retroarch save files and states use the filename directly.
-                # For example: retroarch save srm: "Castlevania - Symphony of the Night (USA).srm", romm['name']: "Castlevania: Symphony of the Night"
-                # romm_library.library columns: 'fs_name' (full romm filename including region and extension i.e. "Metal Slug X (USA).chd")
-                #   I went with this way because it'd be reliable and broad enough, but there are other objects I could use.
-                match = LibraryScanner.find_rom(game.name, platform_games)
-                matching_game_entry = [match] if match else []
-
-                if len(matching_game_entry) > 0:
-                    game.set_romm_data(matching_game_entry[0])
-                else:
-                    # Game not found in ROMM library
-                    msg = (f"Could not match {game.name} with platform '{game.platform}' to ROMM server. "
-                           "Check this folder on the Platforms page and that the game is in your RomM library.")
-                    warn_key = f"{game.platform}/{game.name}"
-                    if warn_key in LibraryScanner._warned_unmatched:
-                        logger.debug(msg)  # already warned once
-                    else:
-                        LibraryScanner._warned_unmatched.add(warn_key)
-                        logger.warning(msg)
-                    game.is_matched = False
-
-            else:
+            if not game.platform:
                 logger.warning(f"Failed to match {game.name}. Games must be organized by platform/content directory. Check your local library structure.")
+                continue
+            slug = romm_library.get_romm_platform(game.platform)
+            logger.debug(f"{game.name} -- Matched platform {game.platform} to slug {slug}.")
+            key = slug or game.platform
+            if key not in by_slug:
+                by_slug[key] = [g for g in romm_library.library if g['platform_slug'] == key]
+            plans.append((game, by_slug[key]))
+
+        # Pass 1: exact names. Each ROM goes to one local game per system folder pass.
+        pending = []
+        for game, platform_games in plans:
+            match = LibraryScanner.find_rom(game.name, platform_games, exact_only=True)
+            if match is not None:
+                game.set_romm_data(match)
+                taken.add(match['id'])
+            else:
+                pending.append((game, platform_games))
+
+        # Pass 2: closest prefix match among ROMs nobody claimed exactly.
+        for game, platform_games in pending:
+            match = LibraryScanner.find_rom(game.name, platform_games, exclude_ids=taken)
+            if match is not None:
+                game.set_romm_data(match)
+                taken.add(match['id'])
+                continue
+            game.is_matched = False
+            msg = (f"Could not match {game.name} with platform '{game.platform}' to ROMM server. "
+                   "Check this folder on the Platforms page and that the game is in your RomM library.")
+            warn_key = f"{game.platform}/{game.name}"
+            if warn_key in LibraryScanner._warned_unmatched:
+                logger.debug(msg)  # already warned once
+            else:
+                LibraryScanner._warned_unmatched.add(warn_key)
+                logger.warning(msg)
 
     @staticmethod
     def _norm(text: str) -> str:
         return " ".join(str(text).casefold().split())
 
     @staticmethod
-    def find_rom(save_name: str, platform_games: List[dict]) -> Optional[dict]:
+    def find_rom(save_name: str, platform_games: List[dict], exclude_ids: Optional[set] = None,
+                 exact_only: bool = False) -> Optional[dict]:
         """Pick the RomM ROM a save belongs to. RetroArch names saves after the ROM file, so:
           1. exact: ROM file name without extension (or a multi-file ROM's folder name) == save name
           2. prefix: ROM file name starts with the save name followed by a space/bracket/dot
@@ -623,8 +630,12 @@ class LibraryScanner:
             if len(exact) > 1:
                 logger.debug(f"{save_name}: {len(exact)} exact ROM matches, using {exact[0]['fs_name']}")
             return exact[0]
+        if exact_only:
+            return None
         prefix = []
         for g in platform_games:
+            if exclude_ids and g.get('id') in exclude_ids:
+                continue  # already claimed by another local game whose name matches it exactly
             fs = LibraryScanner._norm(g.get('fs_name') or "")
             if fs.startswith(want) and len(fs) > len(want) and fs[len(want)] in " ([.-_":
                 prefix.append(g)

@@ -38,6 +38,7 @@
   <Config Name="Dashboard password" Target="WEB_PASSWORD" Default="" Mode="" Description="Optional basic auth for the web UI" Type="Variable" Display="advanced" Required="false" Mask="true"/>
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="Owner of files written to the sync folders" Type="Variable" Display="advanced" Required="false" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group of files written to the sync folders" Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
+  <Config Name="File permissions" Target="FILE_MODE" Default="0777|0666|0775|0664" Mode="" Description="Permissions for files and folders written to the sync folders (0777 = read/write for everyone, typical on Unraid)" Type="Variable" Display="advanced" Required="false" Mask="false">0777</Config>
   <Config Name="Log level" Target="LOG_LEVEL" Default="INFO|DEBUG|WARNING|ERROR" Mode="" Description="" Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
   <Config Name="Timezone" Target="TZ" Default="America/Toronto" Mode="" Description="Used for log timestamps" Type="Variable" Display="advanced" Required="false" Mask="false">America/Toronto</Config>
   <Config Name="SAVE_SYNC_FOLDER" Target="SAVE_SYNC_FOLDER" Default="/syncdata/saves" Mode="" Description="Internal: enables the saves mount. Leave as is." Type="Variable" Display="advanced-hide" Required="false" Mask="false">/syncdata/saves</Config>

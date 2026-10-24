@@ -207,6 +207,7 @@ A full sync now fetches all saves and states in two API calls instead of two per
 | `BACKUP_RETENTION_DAYS` | 30 | keep backups of overwritten files this long (`0` = forever) |
 | `DATA_FOLDER` → `/data` | `./data` | sync history, pending approvals, backups. **Keep this persistent**, it's how changes on each side are told apart |
 | `PUID` / `PGID` | — | owner of files written into the sync folders (Unraid: `99` / `100`) |
+| `FILE_MODE` | 0777 | permissions for files and folders written into the sync folders and backups (also on the Settings page) |
 
 ### Web UI
 

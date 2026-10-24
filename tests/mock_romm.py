@@ -32,6 +32,9 @@ PLATFORMS = {
     3: ("psx", "PlayStation", (242, 179, 61)),
     4: ("n64", "Nintendo 64", (60, 207, 142)),
     5: ("genesis", "Sega Mega Drive/Genesis", (255, 93, 108)),
+    6: ("saturn", "Sega Saturn", (200, 200, 220)),
+    7: ("gb", "Game Boy", (140, 190, 80)),
+    8: ("c64", "Commodore 64", (120, 110, 230)),
 }
 
 
@@ -314,6 +317,19 @@ def seed_demo():
     S.add_asset("states", 13, "Lantern Keep (USA) [2026-10-21_10-00-00].autosave.state0", b"lantern-slot0", now() - timedelta(hours=5), with_screenshot=True)
     S.add_asset("states", 13, "Lantern Keep (USA) [2026-10-21_11-00-00].autosave.state.auto", b"lantern-auto", now() - timedelta(hours=4))
     S.add_asset("saves", 42, "autosave [2026-10-22_09-00-00].srm", b"orbit-from-web-player", now() - timedelta(hours=2))
+        # --- regression scenarios seen on a real RomM 5.4 library ---
+    # Multi-disc: saves sync with the multi-file ROM, an older version also attached copies to "(Disc 1)"
+    S.add_rom(61, 6, "Panzer Dragoon Saga (USA)", "Panzer Dragoon Saga")
+    S.add_rom(62, 6, "Panzer Dragoon Saga (USA) (Disc 1).chd", "Panzer Dragoon Saga (USA) (Disc 1)")
+    S.add_asset("saves", 61, "Panzer Dragoon Saga (USA).bkr", b"panzer-current", t)
+    S.add_asset("saves", 62, "Panzer Dragoon Saga (USA).bkr", b"panzer-OLD-copy", t - timedelta(days=1))
+    # States uploaded into RomM's *saves* list by another client
+    S.add_rom(71, 7, "Mario's Picross (USA, Europe).gb", "Mario's Picross (USA, Europe)")
+    S.add_asset("saves", 71, "Mario's Picross (USA, Europe).state1", b"picross-slot1", t)
+    # "Fallen" vs "Fallen Angel": only "Fallen Angel" is in RomM; a stray "Fallen" state got attached to it
+    S.add_rom(81, 8, "Fallen Angel.crt", "Fallen Angel")
+    S.add_asset("states", 81, "Fallen Angel.state.auto", b"fallen-angel", t)
+    S.add_asset("states", 81, "Fallen.state.auto", b"fallen-stray", t)
         # conflict (state store seeds a baseline that both sides have moved past)
     S.add_asset("saves", 31, "Crystal Caverns (USA).srm", b"crystal-save-romm-edit", now() - timedelta(hours=1))
     S.add_asset("states", 31, "Crystal Caverns (USA).state3", b"crystal-state-romm", now() - timedelta(hours=1), with_screenshot=True)
