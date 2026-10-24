@@ -338,6 +338,7 @@ html,body{overflow-x:hidden}
       <div class="side">
         <div class="kv"><div class="k">Last sync</div><div class="v" id="last-sync">—</div></div>
         <div class="kv"><div class="k">Next RomM check</div><div class="v" id="next-sync">—</div></div>
+        <div class="kv" title="The sync folders are only read when RomM has changes, at startup, on Sync now, and on the scheduled re-scan, so the disks they're on can stay asleep."><div class="k">Last folder scan</div><div class="v" id="last-scan">—</div></div>
         <div class="kv"><div class="k">Folder → RomM (new files)</div><div class="v" id="push-mode">—</div></div>
         <div class="kv"><div class="k">RomM → Folder</div><div class="v" id="pull-mode">—</div></div>
         <div class="kv"><div class="k">Games tracked</div><div class="v" id="games-count">—</div></div>
@@ -702,6 +703,7 @@ function renderStatus(d){
   $("#notices").innerHTML = notes.join("");
 
   $("#last-sync").textContent = ago(d.last_sync_finished);
+  $("#last-scan").textContent = d.last_folder_scan ? ago(d.last_folder_scan) : "—";
   $("#next-sync").textContent = d.next_sync_at ? ago(d.next_sync_at) : (d.config.sync_mode==="watch" && !d.config.poll_interval ? "off" : "—");
   $("#push-mode").textContent = MODE[d.config.push_new_mode] || d.config.push_new_mode;
   $("#pull-mode").textContent = (d.config.pull_mode!=="off" && !d.config.pull_writable) ? "Off (read-only mount)" : (MODE[d.config.pull_mode] || d.config.pull_mode);

@@ -1,3 +1,4 @@
+import threading
 import os
 from pathlib import Path
 from typing import List, Dict, TYPE_CHECKING
@@ -234,6 +235,10 @@ class RommUser:
         self.api_token = romm_api_token
         self._saves = None
         self._states = None
+        # (kind, id) of saves/states this app created, replaced or deleted itself. The quiet RomM check uses it
+        # so our own uploads don't look like "something changed on RomM" and trigger a folder scan.
+        self.own_changes: set = set()
+        self._own_lock = threading.Lock()
 
     def _auth_kwargs(self) -> dict:
         if self.auth_type == "api":
@@ -291,7 +296,9 @@ class RommUser:
             logger.debug(f"{'POST' if romm_id is None else 'PUT'} {url} - {response.status_code}")
             if response.status_code >= 400:
                 raise RuntimeError(f"RomM returned {response.status_code}: {response.text[:300]}")
-            return response.json()
+            data = response.json()
+            self.mark_own(kind, [romm_id, (data or {}).get("id") if isinstance(data, dict) else None])
+            return data
         finally:
             for h in handles:
                 h.close()
@@ -305,6 +312,19 @@ class RommUser:
         logger.debug(f"POST {url} {ids} - {response.status_code}")
         if response.status_code >= 400:
             raise RuntimeError(f"RomM returned {response.status_code}: {response.text[:300]}")
+        self.mark_own(kind, ids)
+
+    def mark_own(self, kind: str, ids) -> None:
+        with self._own_lock:
+            self.own_changes.update((kind, i) for i in ids if i is not None)
+
+    def fingerprint(self) -> Dict[tuple, str]:
+        """{(kind, id): updated_at} for every save and state. Two network requests, no disk access."""
+        out = {}
+        for kind in ("saves", "states"):
+            for it in self.list_all(kind):
+                out[(kind, it.get("id"))] = str(it.get("updated_at"))
+        return out
 
     def absolute(self, path: str) -> str:
         """Turn a RomM-relative path (/assets/..., /api/raw/...) into a full URL."""

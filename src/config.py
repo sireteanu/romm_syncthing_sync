@@ -49,6 +49,7 @@ class Config:
                  push_new_mode: str = os.getenv("PUSH_NEW_MODE", "auto").lower(),
                  pull_mode: str = os.getenv("PULL_MODE", "auto").lower(),
                  romm_poll_interval_seconds: int = int(os.getenv("ROMM_POLL_INTERVAL_SECONDS", "600")),
+                 full_scan_interval_hours: int = int(os.getenv("FULL_SCAN_INTERVAL_HOURS", "24")),
                  web_ui: bool = os.getenv("WEB_UI", "true").lower() == "true",
                  web_port: int = int(os.getenv("WEB_PORT", "8080")),
                  web_username: str = os.getenv("WEB_USERNAME", ""),
@@ -91,6 +92,8 @@ class Config:
         self.PULL_MODE: str = pull_mode if pull_mode in ("off", "confirm", "auto") else "auto"
         # Watch mode only sees local file events, so RomM-side changes are found by polling.
         self.ROMM_POLL_INTERVAL_SECONDS: int = romm_poll_interval_seconds
+        # Watch mode: re-read the whole sync folders this often even if nothing seems to have changed (0 = never)
+        self.FULL_SCAN_INTERVAL_HOURS: int = full_scan_interval_hours
         self.BACKUP_RETENTION_DAYS: int = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
 
         # Web GUI

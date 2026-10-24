@@ -15,7 +15,7 @@ from .games_class import Game
 from .library_classes import LocalLibrary, RetroGameServer, LibraryScanner
 from .config import get_config, METADATA_FILE_FILTERS
 from .sync_engine import SyncEngine, cleanup_backups
-from .sync_state import STATE
+from .sync_state import STATE, utcnow_iso
 from watchdog.events import FileSystemEventHandler
 
 
@@ -174,6 +174,7 @@ class SyncOrchestrator:
                 logger.info(f"[FULLSYNC] {self._fmt(summary)}")
                 logger.info("---------- Full sync completed ----------")
                 STATE.sync_finished(summary)
+                STATE.last_folder_scan = utcnow_iso()
                 cleanup_backups()
                 from . import recycle
                 recycle.purge(int(self.app_cfg.RECYCLE_RETENTION_DAYS))
@@ -385,6 +386,14 @@ class RommPoller:
         self.thread = threading.Thread(target=self._run, name="romm-poller", daemon=True)
 
     def start(self):
+        if STATE.last_folder_scan:  # the startup sync just read everything: remember what RomM looked like
+            try:
+                api = get_config().ROMM_CREDENTIALS
+                self._last_fp = api.fingerprint()
+                with api._own_lock:
+                    api.own_changes.clear()
+            except Exception as e:
+                logger.debug(f"Couldn't read RomM's file list yet ({e}); the first check will do a full sync.")
         self.thread.start()
 
     def trigger(self):
@@ -399,14 +408,66 @@ class RommPoller:
             interval = max(int(get_config().ROMM_POLL_INTERVAL_SECONDS), 0)  # live (Settings page)
             wait = interval if interval > 0 else None
             STATE.next_sync_at = _in_seconds(interval) if interval > 0 else None
-            self.wake_event.wait(timeout=wait)
+            manual = self.wake_event.wait(timeout=wait)  # True = "Sync now" pressed
             self.wake_event.clear()
             if self.stop_event.is_set():
                 break
             try:
-                self.orchestrator.full_sync(force_sync=False)
+                if manual:
+                    self._full()
+                else:
+                    self.check()
             except Exception as e:
                 logger.error(f"RomM poll failed: {e}")
+
+    # Quiet polling: the sync folders are only read when RomM actually has something new, so disks that hold
+    # them (e.g. an Unraid array) aren't woken every few minutes. Local changes arrive through file events.
+    _last_fp: Optional[dict] = None
+
+    def _full(self):
+        api = get_config().ROMM_CREDENTIALS
+        before = set(api.own_changes)
+        try:
+            fp = api.fingerprint()
+        except Exception:
+            fp = None
+        self.orchestrator.full_sync(force_sync=False)
+        STATE.last_romm_check = utcnow_iso()
+        if fp is not None:
+            self._last_fp = fp
+            with api._own_lock:
+                api.own_changes -= before
+
+    def romm_changes(self, fp: dict, own: set) -> list:
+        """RomM files added, changed or removed since the last check, ignoring the ones this app changed."""
+        last = self._last_fp or {}
+        changed = [k for k, v in fp.items() if last.get(k) != v] + [k for k in last if k not in fp]
+        return [k for k in changed if k not in own]
+
+    def check(self):
+        cfg = get_config()
+        hours = int(getattr(cfg, "FULL_SCAN_INTERVAL_HOURS", 24) or 0)
+        if self._last_fp is None:
+            return self._full()
+        if hours > 0 and STATE.last_folder_scan:
+            from datetime import datetime, timezone
+            age = datetime.now(timezone.utc) - datetime.fromisoformat(STATE.last_folder_scan)
+            if age.total_seconds() >= hours * 3600:
+                logger.info(f"Scheduled folder re-scan (every {hours} h).")
+                return self._full()
+        api = cfg.ROMM_CREDENTIALS
+        before = set(api.own_changes)
+        fp = api.fingerprint()
+        STATE.last_romm_check = utcnow_iso()
+        changes = self.romm_changes(fp, before)
+        if not changes:
+            logger.debug("RomM check: nothing new on RomM; sync folders not touched.")
+            self._last_fp = fp
+            with api._own_lock:
+                api.own_changes -= before
+            return
+        logger.info(f"RomM check: {len(changes)} save/state change(s) on RomM; syncing.")
+        self._full()
 
 
 class FileChangeHandler(FileSystemEventHandler):

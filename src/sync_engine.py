@@ -76,14 +76,16 @@ def _load_hash_cache():
         logger.debug(f"Ignoring unreadable hash cache: {e}")
 
 
-def save_hash_cache():
-    """Persist fingerprints so a restart doesn't re-read every save (dropping files that no longer exist)."""
+def save_hash_cache(prune: bool = False):
+    """Persist fingerprints so a restart doesn't re-read every save. prune (full syncs only, which read the
+    folders anyway) drops files that no longer exist; small syncs skip it so they don't touch every file."""
     global _hash_cache_dirty
     if not _hash_cache_dirty:
         return
     import json
-    for k in [k for k in _hash_cache if not os.path.exists(k)]:
-        del _hash_cache[k]
+    if prune:
+        for k in [k for k in _hash_cache if not os.path.exists(k)]:
+            del _hash_cache[k]
     tmp = _hash_cache_file().with_suffix(".tmp")
     try:
         tmp.write_text(json.dumps(_hash_cache))
@@ -387,7 +389,7 @@ class SyncEngine:
                 logger.info(f"Removed {len(stale)} queued item(s) that no longer apply.")
 
         STATE.save()
-        save_hash_cache()
+        save_hash_cache(prune=discover_remote)
         return summary
 
     def _reconcile_game(self, game: Game, remote, pull_mode, force, summary):

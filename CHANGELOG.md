@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.8.0 — lets your disks sleep
+
+### Changed
+- **The RomM check no longer reads your sync folders.** In watch mode, every `ROMM_POLL_INTERVAL_SECONDS` the app now only asks RomM for its list of saves and states. Your folders are read only if RomM actually has something new (another device, the web player…). Before, every check re-read every file's details in the saves and states folders, which could spin up Unraid array disks every 10 minutes.
+- Uploads, updates and deletions the app made itself don't count as "RomM changed", so syncing a save you just played doesn't trigger a folder scan.
+- Syncing one changed save no longer checks every other file in the folders.
+
+### Added
+- `FULL_SCAN_INTERVAL_HOURS` (default 24, `0` = never): a scheduled full re-read of the sync folders as a safety net. Also on the Settings page.
+- **Last folder scan** on the dashboard.
+
 ## 2.7.0 — recycle bin
 
 ### Added

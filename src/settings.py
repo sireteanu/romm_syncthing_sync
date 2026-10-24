@@ -33,7 +33,12 @@ FIELDS: Dict[str, dict] = {
     "ROMM_POLL_INTERVAL_SECONDS": {"type": "int", "min": 0, "max": 86400, "unit": "seconds", "group": "timing",
                                    "label": "Check RomM for changes every",
                                    "help": "Watch mode: how often changes made on RomM (other devices) are picked up. "
-                                           "0 = only when you press Sync now. Applies from the next check."},
+                                           "0 = only when you press Sync now. Applies from the next check. "
+                                           "This only asks RomM; your sync folders are read only when RomM has changes."},
+    "FULL_SCAN_INTERVAL_HOURS": {"type": "int", "min": 0, "max": 720, "unit": "hours", "group": "timing",
+                                 "label": "Re-read the sync folders anyway every",
+                                 "help": "Watch mode: a safety net in case a file change was missed. Each one can wake "
+                                         "the disks the folders live on. 0 = only at startup and when you press Sync now."},
     "WATCHDOG_DELAY_SECONDS": {"type": "int", "min": 0, "max": 3600, "unit": "seconds", "group": "timing",
                                "label": "Wait after a file changes",
                                "help": "Watch mode: quiet time after Syncthing writes a file before syncing it."},

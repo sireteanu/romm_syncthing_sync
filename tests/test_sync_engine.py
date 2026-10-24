@@ -379,3 +379,46 @@ def test_file_mode_setting_accepts_numeric_choice():
     st.update(cfg, {"FILE_MODE": "438"}, [])
     assert cfg.FILE_MODE == 0o666
     st.update(cfg, {}, ["FILE_MODE"])
+
+
+# --- quiet RomM polling (watch mode) ------------------------------------
+def test_quiet_poll_only_scans_when_romm_changed(monkeypatch):
+    import threading as _t
+    from src import sync_orchestrator as so
+
+    class FakeApi:
+        def __init__(self):
+            self.fp = {("saves", 1): "t1"}
+            self.own_changes = set()
+            self._own_lock = _t.Lock()
+
+        def fingerprint(self):
+            return dict(self.fp)
+
+    class FakeCfg:
+        FULL_SCAN_INTERVAL_HOURS = 0
+        def __init__(self, api):
+            self.ROMM_CREDENTIALS = api
+
+    class FakeOrch:
+        runs = 0
+        def full_sync(self, force_sync=False):
+            FakeOrch.runs += 1
+
+    api = FakeApi()
+    monkeypatch.setattr(so, "get_config", lambda: FakeCfg(api))
+    p = so.RommPoller(FakeOrch(), 600)
+    p.check()                      # first check: no fingerprint yet -> full sync
+    assert FakeOrch.runs == 1
+    p.check()                      # nothing changed on RomM -> folders untouched
+    assert FakeOrch.runs == 1
+    api.fp[("saves", 2)] = "t2"    # our own upload
+    api.own_changes.add(("saves", 2))
+    p.check()
+    assert FakeOrch.runs == 1 and not api.own_changes
+    api.fp[("states", 9)] = "t3"   # another device uploaded a state
+    p.check()
+    assert FakeOrch.runs == 2
+    del api.fp[("saves", 1)]       # deleted on RomM
+    p.check()
+    assert FakeOrch.runs == 3

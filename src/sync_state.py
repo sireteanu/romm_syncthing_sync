@@ -114,6 +114,8 @@ class AppState:
         self.last_sync_finished: Optional[str] = None
         self.last_sync_result: Optional[dict] = None
         self.next_sync_at: Optional[str] = None
+        self.last_romm_check: Optional[str] = None   # quiet RomM-only checks (watch mode)
+        self.last_folder_scan: Optional[str] = None  # last time the sync folders were read in full
         self.sync_mode: str = ""
         self.last_error: Optional[str] = None
         self.romm_version: Optional[str] = None
@@ -368,6 +370,8 @@ class AppState:
                 "last_sync_finished": self.last_sync_finished,
                 "last_sync_result": self.last_sync_result,
                 "next_sync_at": self.next_sync_at,
+                "last_romm_check": self.last_romm_check,
+                "last_folder_scan": self.last_folder_scan,
                 "sync_mode": self.sync_mode,
                 "last_error": self.last_error,
                 "systems": sorted(systems.values(), key=lambda s: s["display_name"].lower()),

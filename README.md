@@ -187,16 +187,20 @@ Use **`SAVE_SYNC_FOLDER`** and **`STATE_SYNC_FOLDER`**.
 ### Sync mode
 
 **`SYNC_MODE`**:
-- `watch` (default): full sync on start, then incremental syncs on file changes. RomM is also re-checked every `ROMM_POLL_INTERVAL_SECONDS`, because changes made on RomM don't create local file events.
+- `watch` (default, recommended): full sync on start, then incremental syncs on file changes. RomM is also checked every `ROMM_POLL_INTERVAL_SECONDS`, because changes made on RomM don't create local file events.
 - `periodic`: full sync every `SYNC_INTERVAL_SECONDS`.
 
+**Lets your disks sleep (watch mode).** The app only ever reads the folders you map into it: your saves and states folders, and `/data`. It never reads your ROMs, because the game list comes from RomM's API. The RomM check is quiet: it asks RomM for its list of saves and states (no disk access) and reads your sync folders only when RomM actually has something new. A save you changed is synced on its own, without re-reading the rest of the folder. The folders are read in full only at startup, on **Sync now**, when RomM has changes, and once every `FULL_SCAN_INTERVAL_HOURS` as a safety net (`0` = never). The dashboard shows when that last happened (*Last folder scan*).
+
+On Unraid, the best setup is to keep the saves/states share and `appdata` on a cache pool (*Primary storage: Cache*, *Secondary storage: None*). Then nothing this app or Syncthing does can spin up array disks.
 A full sync now fetches all saves and states in two API calls instead of two per game, so it's quick even for large libraries.
 
 | Variable | Default | |
 |---|---|---|
 | `WATCHDOG_DELAY_SECONDS` | 60 | watch: quiet time after file activity before syncing |
 | `ROMM_POLL_INTERVAL_SECONDS` | 600 | watch: how often to check RomM for changes. `0` = only when you click **Sync now** |
-| `SYNC_INTERVAL_SECONDS` | 1800 | periodic: seconds between full syncs |
+| `FULL_SCAN_INTERVAL_HOURS` | 24 | watch: re-read the sync folders anyway this often, in case a file change was missed. `0` = only at startup and on **Sync now** |
+| `SYNC_INTERVAL_SECONDS` | 1800 | periodic: seconds between full syncs (each one reads the sync folders) |
 | `FULL_INITIAL_SYNC` | true | `true`, `false`, or `force` (force-push once on startup) |
 | `FORCE_PUSH_SYNC` | false | local always wins, even over conflicts. Dangerous |
 
