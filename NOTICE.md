@@ -21,6 +21,7 @@ Modifications by [sireteanu](https://github.com/sireteanu), also under the MIT L
 | Platform catalog from RomM's GitHub, Platforms page, automatic platform resolution | `src/platforms.py`, `src/library_classes.py` |
 | Settings page, notifications (Discord, ntfy, Gotify, Pushbullet, webhook) | `src/settings.py`, `src/notify.py` |
 | Version display and update check | `src/version.py` |
+| Deletion sync and recycle bin | `src/recycle.py`, `src/sync_engine.py` |
 | Tests, mock RomM server and demo data | `tests/` |
 
 Lines changed in files that came from the original project are listed in the git history

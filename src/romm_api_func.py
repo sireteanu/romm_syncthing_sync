@@ -296,6 +296,16 @@ class RommUser:
             for h in handles:
                 h.close()
 
+    def delete_assets(self, kind: str, ids: List[int]) -> None:
+        """Delete saves/states on RomM (POST /api/{kind}/delete). kind: 'saves' or 'states'."""
+        if not ids:
+            return
+        url = f"{self.url}/api/{kind}/delete"
+        response = requests.post(url, json={kind: list(ids)}, timeout=60, **self._auth_kwargs())
+        logger.debug(f"POST {url} {ids} - {response.status_code}")
+        if response.status_code >= 400:
+            raise RuntimeError(f"RomM returned {response.status_code}: {response.text[:300]}")
+
     def absolute(self, path: str) -> str:
         """Turn a RomM-relative path (/assets/..., /api/raw/...) into a full URL."""
         if path.startswith("http://") or path.startswith("https://"):

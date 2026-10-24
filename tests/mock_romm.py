@@ -160,6 +160,17 @@ def list_assets(kind: str, rom_id: Optional[int] = None, platform_id: Optional[i
     return items
 
 
+@app.post("/api/{kind}/delete")
+async def delete_assets(kind: str, request: Request):
+    body = await request.json()
+    ids = set(body.get(_kind(kind), []))
+    before = len(S.assets[kind])
+    S.assets[kind] = [i for i in S.assets[kind] if i["id"] not in ids]
+    if before - len(S.assets[kind]) != len(ids):
+        raise HTTPException(404, "not found")
+    return sorted(ids)
+
+
 @app.get("/api/{kind}/{aid}")
 def get_asset(kind: str, aid: int):
     for i in S.assets[_kind(kind)]:

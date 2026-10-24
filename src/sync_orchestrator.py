@@ -175,6 +175,8 @@ class SyncOrchestrator:
                 logger.info("---------- Full sync completed ----------")
                 STATE.sync_finished(summary)
                 cleanup_backups()
+                from . import recycle
+                recycle.purge(int(self.app_cfg.RECYCLE_RETENTION_DAYS))
                 return result
 
             except Exception as e:
@@ -187,6 +189,7 @@ class SyncOrchestrator:
     @staticmethod
     def _fmt(summary: dict) -> str:
         return (f"uploaded {summary['pushed']}, downloaded {summary['pulled']}, "
+                f"to recycle bin {summary.get('deleted', 0)}, "
                 f"awaiting approval {summary['queued']}, conflicts {summary['conflicts']}, "
                 f"in sync {summary['in_sync']}, errors {summary['errors']}")
 

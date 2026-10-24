@@ -31,9 +31,9 @@ On the next sync each side is compared to its baseline:
 | Local | RomM | Baseline | Result |
 |---|---|---|---|
 | ✓ | — | none | `push_new`: automatic (asks only with `PUSH_NEW_MODE=confirm`) |
-| ✓ | — | exists | `push_new`, always asks (probably deleted on RomM) |
+| ✓ | — | exists | deleted on RomM: local unchanged → `delete_local` (local copy moved to the recycle bin; automatic with `DELETE_MODE=auto`, asks with `ask`). Local changed, or `DELETE_MODE=off` → `push_new`, always asks |
 | — | ✓ | none | `pull_new`: automatic (asks with `PULL_MODE=confirm`; skipped if `off`) |
-| — | ✓ | exists | `pull_new`, always asks (probably deleted locally) |
+| — | ✓ | exists | deleted locally: RomM unchanged → `delete_romm` (RomM copy downloaded into the recycle bin, then deleted on RomM). RomM changed, or `DELETE_MODE=off` → `pull_new`, always asks |
 | ✓ | ✓ | any | same content hash → in sync (baseline recorded) |
 | ✓ | ✓ | none | local newer → upload. RomM newer with a different hash → `pull_update`, **always asks** (no history, so it's unclear which copy has your progress). Otherwise assume in sync. (This is the upgrade path from 1.x.) |
 | ✓ | ✓ | exists | nothing changed → nothing to do |
@@ -53,6 +53,8 @@ When a transfer fails, `explain_error()` turns the exception into a sentence you
 - **Backups.** Every overwrite first copies the losing version to `/data/backups/YYYY-MM-DD/<system>/HHMMSS-{local|romm}-<file>`. If RomM's copy can't be downloaded for the backup, the upload is refused.
 - **Atomic writes.** Downloads go to a hidden temp file and are renamed into place. Partial files never appear in the sync folder, so Syncthing never sees them.
 - **No echo.** After a download the baseline holds the new hash. The file event that follows is recognised as "in sync" and not uploaded back.
+- **Recycle bin.** A delete carried to the other side keeps a copy in `/data/recycle/<id>/` first; if RomM's copy can't be downloaded, it isn't deleted. Items are cleared after `RECYCLE_RETENTION_DAYS`.
+- **Mass-delete guard.** More than 10 deletions in one sync are queued for approval instead of carried out.
 - **Skips are remembered** (`dismissed` in the state file) until either copy changes.
 - **Conflict copies** (`… (conflict 2026-10-23 120000).srm`) uploaded by **Keep both** are archive-only. They are never downloaded to devices.
 - **Path safety.** Names coming from RomM are confined to `<sync folder>/<system folder>/`. The dashboard's image proxy only fetches RomM-relative paths and only serves images from inside the sync folders.
@@ -75,6 +77,7 @@ A full sync reads the RomM library (paginated), then **all** saves and **all** s
 | List saves / states | `GET /api/saves`, `GET /api/states` |
 | Upload new | `POST /api/{saves,states}?rom_id=` (multipart `saveFile`/`stateFile`, optional `screenshotFile`) |
 | Replace | `PUT /api/{saves,states}/{id}` |
+| Delete | `POST /api/{saves,states}/delete` (body `{"saves": [ids]}` / `{"states": [ids]}`) |
 | Check before acting | `GET /api/{saves,states}/{id}` |
 | Download | `GET /api/{saves,states}/{id}/content` (RomM 5.x), falling back to the item's `download_path` |
 | Covers, screenshots, platform icons | `path_cover_small`, `merged_screenshots`, state `screenshot.download_path`, `/assets/platforms/<slug>.svg` |

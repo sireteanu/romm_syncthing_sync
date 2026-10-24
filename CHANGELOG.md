@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.7.0 — recycle bin
+
+### Added
+- **Deletions sync both ways, through a recycle bin.** Delete a save or state in your sync folder and it's removed from RomM too; delete it in RomM and the local file is removed. The other side's copy is moved to the **Recycle bin** first (`/data/recycle`), never destroyed outright.
+- **Recycle bin page:** Restore (back into the sync folder; the next sync uploads it to RomM again), Download, Delete forever, Empty recycle bin. A badge in the menu shows how many items it holds.
+- **Clear the recycle bin after X days:** `RECYCLE_RETENTION_DAYS` (default 30, `0` = never), also on the Settings page.
+- **When a synced file is deleted on one side:** `DELETE_MODE` = Recycle bin (`auto`, default) / Ask first (`ask`) / Never (`off`), on the Settings page.
+- **Deletions** tab under Needs attention, with *Delete all* / *Bring all back*.
+
+### Safety
+- A file is only deleted when the other copy is unchanged since the last sync; otherwise you're asked.
+- More than 10 deletions in one sync (e.g. an unmounted share) are held for approval instead of carried out.
+- If RomM's copy can't be downloaded into the bin, it isn't deleted on RomM.
+
+### Fixed
+- Menu items no longer wrap on narrow screens.
+
 ## 2.6.1 — fixes for downloads that kept coming back
 
 ### Fixed

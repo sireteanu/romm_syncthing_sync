@@ -132,7 +132,7 @@ h2 .count{background:var(--surface-2);border:1px solid var(--line);border-radius
 .ap-row .why{font-size:12px;color:var(--faint)}
 .ap-row .acts{display:flex;gap:6px}
 .dir{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:6px;margin-right:6px}
-.dir.up{background:var(--info-bg);color:var(--info)} .dir.down{background:var(--ok-bg);color:var(--ok)} .dir.conf{background:var(--bad-bg);color:var(--bad)}
+.dir.del{background:var(--warn-bg);color:var(--warn)} .dir.up{background:var(--info-bg);color:var(--info)} .dir.down{background:var(--ok-bg);color:var(--ok)} .dir.conf{background:var(--bad-bg);color:var(--bad)}
 .empty{padding:26px;text-align:center;color:var(--muted)}
 
 /* systems */
@@ -254,7 +254,7 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
 @media (max-width:860px){ .set-grid{grid-template-columns:1fr} }
 /* nav + platforms view */
 .nav{display:flex;gap:2px;margin-left:18px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-pill);padding:3px;height:38px;align-items:center}
-.nav a{height:30px;padding:0 14px;border-radius:var(--r-pill);color:var(--muted);text-decoration:none;font-weight:600;font-size:13px;display:flex;gap:6px;align-items:center;transition:background .15s var(--ease),color .15s var(--ease)}
+.nav a{height:30px;padding:0 14px;border-radius:var(--r-pill);color:var(--muted);text-decoration:none;font-weight:600;font-size:13px;display:flex;gap:6px;align-items:center;white-space:nowrap;flex-shrink:0;transition:background .15s var(--ease),color .15s var(--ease)}
 .nav a:hover{color:var(--text)}
 .nav a.on{background:var(--text);color:var(--bg)}
 .nav a .n{font-size:11px;background:var(--bad-bg);color:var(--bad);border-radius:99px;padding:0 6px}
@@ -281,8 +281,8 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
 .legend-row{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);padding:12px 20px;border-top:1px solid var(--line)}
 @media (max-width:860px){
   header.top .wrap{flex-wrap:wrap;height:auto;padding-top:10px;padding-bottom:10px;row-gap:10px}
-  .nav{order:10;margin-left:0;width:100%}
-  .nav a{flex:1;justify-content:center}
+  .nav{order:10;margin-left:0;width:100%;overflow-x:auto;scrollbar-width:none}
+  .nav a{flex:1 0 auto;justify-content:center;padding:0 10px}
   .pf-table thead{display:none}
   .pf-table tr{display:grid;grid-template-columns:1fr auto;gap:6px 10px;padding:12px;border-bottom:1px solid var(--line)}
   .pf-table td{border:0;padding:0}
@@ -315,7 +315,7 @@ html,body{overflow-x:hidden}
     <div>romm_sync<a class="ver" id="ver" target="_blank" rel="noopener" title="Release notes"></a> <small id="romm-url"></small></div>
     <a class="upd" id="upd" target="_blank" rel="noopener" hidden></a>
   </div>
-  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a><a href="#logs" data-view="log">Logs</a><a href="#settings" data-view="set">Settings</a></nav>
+  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a><a href="#recycle" data-view="bin">Recycle bin <span class="n" id="nav-bin" style="background:var(--surface-hover);color:var(--text)" hidden></span></a><a href="#logs" data-view="log">Logs</a><a href="#settings" data-view="set">Settings</a></nav>
   <div class="spacer"></div>
   <span class="pill" id="conn"><span class="dot"></span><span>connecting…</span></span>
   <span class="pill" id="mode-pill" title="Sync mode"></span>
@@ -415,6 +415,21 @@ html,body{overflow-x:hidden}
   <datalist id="pf-options"></datalist>
 </main>
 
+<main class="wrap" id="view-bin" hidden>
+  <section>
+    <div class="card">
+      <div class="pf-head">
+        <div style="flex:1;min-width:260px">
+          <h3>Recycle bin</h3>
+          <p id="bin-sub">When a synced file is deleted on one side, the copy on the other side is moved here instead of being destroyed.</p>
+        </div>
+        <button class="btn danger" id="bin-empty">Empty recycle bin</button>
+      </div>
+      <div style="overflow:auto"><table class="hist"><thead><tr><th></th><th>File</th><th>Game</th><th>What happened</th><th>Deleted</th><th>Size</th><th></th></tr></thead><tbody id="bin-rows"></tbody></table></div>
+    </div>
+  </section>
+</main>
+
 <main class="wrap" id="view-log" hidden>
   <section>
     <h2>Recent actions <span class="count" id="hist-count">0</span></h2>
@@ -511,6 +526,7 @@ const KIND = {
   push_new:{dir:"up", label:"Upload", tab:"push"}, push_update:{dir:"up", label:"Upload", tab:"push"},
   pull_new:{dir:"down", label:"Download", tab:"pull"}, pull_update:{dir:"down", label:"Download", tab:"pull"},
   conflict:{dir:"conf", label:"Conflict", tab:"conflict"},
+  delete_romm:{dir:"del", label:"Delete on RomM", tab:"delete"}, delete_local:{dir:"del", label:"Delete locally", tab:"delete"},
 };
 const MODE = {confirm:"Ask first", auto:"Automatic", off:"Off"};
 
@@ -556,6 +572,12 @@ function findGame(platform, name){ return (state.data?.games||[]).find(g => g.pl
 
 async function approveOne(a){
   const k = KIND[a.kind];
+  if (a.kind.startsWith("delete")) {
+    const where = a.kind==="delete_romm" ? "RomM" : "your sync folder";
+    const ok = await confirmBox({title:`Delete from ${where}?`, body:`<p style="margin:0 0 8px"><b>${esc(a.game)}</b> · <span style="font-family:var(--mono);font-size:12.5px">${esc(a.file_name)}</span></p><p style="margin:0;color:var(--muted)">A copy goes to the recycle bin, so you can restore it later.</p>`, ok:"Delete"});
+    if (ok) decide(a.id, "approve");
+    return;
+  }
   const overwrite = a.kind.endsWith("_update");
   const target = k.dir==="up" ? "RomM" : "the sync folder";
   const ok = await confirmBox({
@@ -660,6 +682,7 @@ function renderStatus(d){
   if (r.pushed!=null) {
     chips.push(`<span class="chip info">⬆ <b>${r.pushed}</b> uploaded</span>`);
     chips.push(`<span class="chip ok">⬇ <b>${r.pulled}</b> downloaded</span>`);
+    if (r.deleted) chips.push(`<a class="chip warn" href="#recycle" style="text-decoration:none">🗑 <b>${r.deleted}</b> to recycle bin</a>`);
     chips.push(`<span class="chip">✓ <b>${r.in_sync}</b> in sync</span>`);
 
     if (r.unmatched) chips.push(`<span class="chip">? <b>${r.unmatched}</b> unmatched</span>`);
@@ -693,6 +716,7 @@ function renderStatus(d){
     if (v.update_available) { upd.textContent = `Update available: v${v.latest}`; upd.href = v.latest_url || `https://github.com/${v.repo}/releases/latest`; upd.title = "Update the container to get it (Unraid: Docker tab → force update)"; }
     document.querySelectorAll("#footer-ver").forEach(e => e.textContent = ` · romm_sync v${v.app}` + (v.romm ? ` · RomM ${v.romm}` : ""));
   }
+  const nb = $("#nav-bin"); nb.hidden = !d.recycle_count; nb.textContent = d.recycle_count || "";
   const btn = $("#sync-btn"); btn.disabled = busy; btn.textContent = busy ? "⟳ Syncing…" : "⟳ Sync now";
   const conn = $("#conn");
   conn.innerHTML = `<span class="dot ${d.phase==="error"?"bad":busy?"busy":d.pending.length?"warn":"ok"}"></span><span>${d.phase==="error"?"error":busy?"working":"connected"}</span>`;
@@ -704,13 +728,13 @@ function renderApprovals(force=false){
   $("#approvals-section").hidden = list.length === 0 && errs.length === 0;
   $("#pending-count").textContent = list.length + errs.length;
   if (!list.length && !errs.length) return;
-  const groups = {conflict:[], errors:errs, push:[], pull:[]};
+  const groups = {conflict:[], errors:errs, delete:[], push:[], pull:[]};
   list.forEach(a => groups[KIND[a.kind].tab].push(a));
-  if (!state.tab || !groups[state.tab].length) state.tab = ["conflict","errors","push","pull"].find(k => groups[k].length);
+  if (!state.tab || !groups[state.tab].length) state.tab = ["conflict","errors","delete","push","pull"].find(k => groups[k].length);
   const h = hashOf([list, errs, state.tab, [...state.busy]]);
   if (!force && state.lastHash.ap === h) return; state.lastHash.ap = h;
 
-  const tabs = [["conflict","Conflicts","conf"],["errors","Errors","conf"],["push","Folder → RomM",""],["pull","RomM → Folder",""]]
+  const tabs = [["conflict","Conflicts","conf"],["errors","Errors","conf"],["delete","Deletions",""],["push","Folder → RomM",""],["pull","RomM → Folder",""]]
     .filter(([k])=>groups[k].length)
     .map(([k,l,c])=>`<button class="tab ${c} ${state.tab===k?"active":""}" data-tab="${k}">${l}<span class="n">${groups[k].length}</span></button>`).join("");
   $("#ap-tabs").innerHTML = tabs;
@@ -733,6 +757,8 @@ function renderApprovals(force=false){
     return;
   }
   const head = {
+    delete:`<span class="title">Deleted on one side</span><span class="muted">Delete moves the other copy to the recycle bin; Bring back copies it over again.</span><span class="spacer"></span>
+          <button class="btn small" id="restore-all">Bring all back</button><button class="btn small primary" id="ok-all">Delete all ${cur.length}</button>`,
     conflict:`<span class="title">Changed in both places</span><span class="muted">Pick which version wins — or keep both. Nothing is overwritten until you choose.</span>`,
     push:`<span class="title">Upload to RomM?</span><span class="muted">These need a decision. Everything else uploads automatically.</span><span class="spacer"></span>
           <button class="btn small" id="rej-all">Skip all</button><button class="btn small primary" id="ok-all">Upload all ${cur.length}</button>`,
@@ -740,7 +766,11 @@ function renderApprovals(force=false){
           <button class="btn small" id="rej-all">Skip all</button><button class="btn small primary" id="ok-all">Download all ${cur.length}</button>`,
   }[state.tab];
   $("#ap-head").innerHTML = head;
-  if ($("#ok-all")) $("#ok-all").onclick = () => approveAll(cur, state.tab==="push"?"Upload":"Download");
+  if ($("#ok-all")) $("#ok-all").onclick = () => approveAll(cur, state.tab==="push"?"Upload":state.tab==="delete"?"Delete":"Download");
+  if ($("#restore-all")) $("#restore-all").onclick = async () => {
+    const ok = await confirmBox({title:`Bring back ${cur.length} file(s)?`, body:`<p style="margin:0">Each one is copied from the side that still has it, so nothing is deleted.</p>`, ok:"Bring back"});
+    if (ok) bulk(cur.map(a=>a.id), "restore");
+  };
   if ($("#rej-all")) $("#rej-all").onclick = async () => {
     const ok = await confirmBox({title:`Skip ${cur.length} item(s)?`, body:`<p style="margin:0">They won't be synced, and you won't be asked again unless the files change.</p>`, ok:"Skip all"});
     if (ok) bulk(cur.map(a=>a.id), "reject");
@@ -758,12 +788,14 @@ function renderApprovals(force=false){
       </div>
       <div class="acts">${busy?`<span class="pill"><span class="dot busy"></span>working</span>`:
         a.kind==="conflict" ? `<button class="btn small primary" data-resolve="${a.id}">Resolve…</button>`
+        : a.kind.startsWith("delete") ? `<button class="btn small" data-rej="${a.id}">Skip</button><button class="btn small" data-restore="${a.id}">Bring back</button><button class="btn small primary" data-ok="${a.id}">Delete</button>`
         : `<button class="btn small" data-rej="${a.id}">Skip</button><button class="btn small primary" data-ok="${a.id}">${k.label}</button>`}</div>
     </div>`;
   }).join("") || `<div class="empty">Nothing here.</div>`;
   const byId = Object.fromEntries(cur.map(a=>[a.id,a]));
   $("#ap-list").querySelectorAll("[data-ok]").forEach(b=>b.onclick=()=>approveOne(byId[b.dataset.ok]));
   $("#ap-list").querySelectorAll("[data-rej]").forEach(b=>b.onclick=()=>decide(b.dataset.rej,"reject"));
+  $("#ap-list").querySelectorAll("[data-restore]").forEach(b=>b.onclick=()=>decide(b.dataset.restore,"restore"));
   $("#ap-list").querySelectorAll("[data-resolve]").forEach(b=>b.onclick=()=>openConflict(byId[b.dataset.resolve]));
 }
 
@@ -1011,6 +1043,46 @@ function renderNotify(){
   };
 }
 
+// ---------- recycle bin ----------
+async function loadBin(){
+  try {
+    const d = await api("api/recycle");
+    const ret = d.retention_days;
+    $("#bin-sub").innerHTML = `When a synced file is deleted on one side, the copy on the other side is moved here instead of being destroyed. ${ret ? `Items are removed for good after <b>${ret} days</b>.` : "Items are kept until you delete them."} <a href="#settings">Change</a>`
+      + (d.delete_mode==="off" ? ` <span style="color:var(--warn)">Deletions are currently not carried across (Settings → Sync behaviour).</span>` : "");
+    $("#bin-empty").disabled = !d.entries.length;
+    $("#bin-rows").innerHTML = d.entries.map(e => {
+      const left = ret ? Math.max(0, Math.ceil(ret - (Date.now() - new Date(e.deleted_at)) / 86400000)) : null;
+      const what = e.deleted_from==="romm" ? "You deleted it in your sync folder → removed from RomM" : "Deleted on RomM → removed from your sync folder";
+      return `<tr><td>${e.has_screenshot?`<div class="thumb" style="width:52px;height:40px;border-radius:6px;background:var(--surface-2) url('api/recycle/${e.id}/screenshot') center/cover"></div>`:""}</td>
+        <td class="f">${esc(e.file_name)}<div style="color:var(--muted);font-family:var(--font)">${e.file_type}</div></td>
+        <td>${esc(e.game)}<div style="color:var(--muted)">${esc(e.platform)}</div></td>
+        <td>${esc(what)}</td>
+        <td style="white-space:nowrap">${ago(e.deleted_at)}${left!==null?`<div style="color:var(--muted)">gone in ${plural(left,"day")}</div>`:""}</td>
+        <td style="white-space:nowrap">${size(e.size)}</td>
+        <td style="white-space:nowrap"><a class="btn small" href="api/recycle/${e.id}/download" download>Download</a> <button class="btn small primary" data-brestore="${e.id}">Restore</button> <button class="btn small danger" data-bdel="${e.id}">Delete</button></td></tr>`;
+    }).join("") || `<tr><td colspan="7" class="empty">The recycle bin is empty.</td></tr>`;
+    const byId = Object.fromEntries(d.entries.map(e=>[e.id,e]));
+    document.querySelectorAll("[data-brestore]").forEach(b => b.onclick = async () => {
+      const e = byId[b.dataset.brestore];
+      const ok = await confirmBox({title:"Restore this file?", body:`<p style="margin:0 0 8px;font-family:var(--mono);font-size:12.5px">${esc(e.file_name)}</p><p style="margin:0;color:var(--muted)">It's put back into your sync folder (<code>${esc(e.restore_path)}</code>) and uploaded to RomM again on the next sync.</p>`, ok:"Restore"});
+      if (!ok) return;
+      try { const r = await api(`api/recycle/${e.id}/restore`, {method:"POST"}); toast(r.message); loadBin(); } catch(err){ toast("⚠ "+err.message); }
+    });
+    document.querySelectorAll("[data-bdel]").forEach(b => b.onclick = async () => {
+      const e = byId[b.dataset.bdel];
+      const ok = await confirmBox({title:"Delete forever?", body:`<p style="margin:0"><span style="font-family:var(--mono)">${esc(e.file_name)}</span> will be permanently deleted. This can't be undone.</p>`, ok:"Delete forever", danger:true});
+      if (!ok) return;
+      try { await api(`api/recycle/${e.id}/delete`, {method:"POST"}); toast("Deleted"); loadBin(); } catch(err){ toast("⚠ "+err.message); }
+    });
+  } catch(e) { $("#bin-rows").innerHTML = `<tr><td colspan="7"><div class="notice bad">${esc(e.message)}</div></td></tr>`; }
+}
+$("#bin-empty").onclick = async () => {
+  const ok = await confirmBox({title:"Empty the recycle bin?", body:`<p style="margin:0">Everything in the recycle bin is permanently deleted. This can't be undone.</p>`, ok:"Empty recycle bin", danger:true});
+  if (!ok) return;
+  try { const r = await api("api/recycle/empty", {method:"POST"}); toast(`Deleted ${r.removed} item(s) for good`); loadBin(); } catch(e){ toast("⚠ "+e.message); }
+};
+
 // ---------- logs view ----------
 const lg = { level:"INFO", q:"", timer:null, lastHash:"" };
 const KIND_LABEL = {push_new:"Upload (new)", push_update:"Upload", pull_new:"Download (new)", pull_update:"Download", conflict:"Conflict"};
@@ -1047,12 +1119,13 @@ $("#log-follow").onchange = () => loadLogs();
 
 // ---------- routing ----------
 function route(){
-  const view = {"#platforms":"plat", "#settings":"set", "#logs":"log"}[location.hash] || "dash";
-  $("#view-dash").hidden = view!=="dash"; $("#view-plat").hidden = view!=="plat"; $("#view-set").hidden = view!=="set"; $("#view-log").hidden = view!=="log";
+  const view = {"#platforms":"plat", "#settings":"set", "#logs":"log", "#recycle":"bin"}[location.hash] || "dash";
+  $("#view-dash").hidden = view!=="dash"; $("#view-plat").hidden = view!=="plat"; $("#view-set").hidden = view!=="set"; $("#view-log").hidden = view!=="log"; $("#view-bin").hidden = view!=="bin";
   document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.dataset.view === view));
   if (view==="plat") loadPlatforms();
   if (view==="set") loadSettings();
   if (view==="log") { lg.lastHash = ""; loadLogs(); }
+  if (view==="bin") loadBin();
 }
 window.addEventListener("hashchange", route);
 window.addEventListener("beforeunload", e => { if (Object.keys(pf.edits).length || Object.keys(sv.edits).length || sv.reset.size || sv.notifDirty) { e.preventDefault(); e.returnValue = ""; } });

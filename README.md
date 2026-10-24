@@ -17,12 +17,13 @@ A utility for syncing emulator save files and save states across your gaming dev
   - every game with its RomM cover art and the latest save-state screenshot (from RomM, or RetroArch's local `.png`)
   - an activity log
 - **RomM → folder sync.** Saves and states that are new or newer on RomM (from another device, the web player, Grout…) can be written back into your Syncthing folder. Syncthing then delivers them to your handhelds.
-- **Asks only when it's unclear.** Everything syncs automatically in both directions. You're only asked when a file changed on both sides, went missing on one side, or two different copies exist with no history. Each question explains why, and failures are listed with a plain-language reason.
+- **Asks only when it's unclear.** Everything syncs automatically in both directions. You're only asked when a file changed on both sides, was deleted on one side but changed on the other, or two different copies exist with no history. Each question explains why, and failures are listed with a plain-language reason.
 - **Conflict handling.** If a file changed on *both* sides since the last sync, nothing is overwritten. The dashboard shows the two versions side by side (time, size, hash, screenshot) and you choose:
   - **keep the folder version**
   - **keep the RomM version**
   - **keep both** (your local copy is stored on RomM as a separate `(conflict …)` entry)
 - **Backups.** Before any file is overwritten (on either side), the version being replaced is copied to `/data/backups/<date>/<system>/`.
+- **Deletions sync, with a recycle bin.** Delete a save on either side and it's removed from the other too. The removed copy goes to a recycle bin you can restore from; it's cleared after a number of days you choose.
 - **Platforms page** to map your system folders to RomM platforms. It uses RomM's official platform list and folder aliases, fetched from RomM's GitHub.
 - **Logs page.** The full app log, filterable by level and searchable, with live updates and download, plus a list of recent uploads, downloads and decisions. The log is also kept in `/data/logs` (rotated).
 - **Settings page.** Change sync behaviour, intervals, backup retention and the dashboard password from the browser. Changes apply immediately, no restart.
@@ -79,7 +80,8 @@ Gaming Devices (RetroArch, etc.)
 | A **new** local file RomM has never seen | Uploaded automatically | `PUSH_NEW_MODE=auto\|confirm` |
 | A file is **new or changed on RomM** only | Downloaded automatically | `PULL_MODE=auto\|confirm\|off` |
 | A file changed **on both sides** | **Asks**: conflict | `FORCE_PUSH_SYNC=true` makes local always win |
-| A previously synced file is **missing on one side** | **Asks** (might be a deliberate delete) | — |
+| A synced file is **deleted on one side** and unchanged on the other | The other side's copy is removed too and kept in the **Recycle bin** | `DELETE_MODE=auto\|ask\|off` |
+| A deleted file was **changed on the other side** since the last sync | **Asks** (the change might matter) | — |
 | Both copies exist and **differ, with no sync history** yet, and RomM's is newer | **Asks** (unclear which has your progress) | — |
 
 Every question shows *why* it's being asked. Files that fail to sync appear under **Errors** with a plain explanation (for example "the API token lacks permission to write saves", "the sync folder is read-only", "RomM rejected the file as too large"), plus **Retry**/**Dismiss** buttons. They clear themselves once they sync.
@@ -205,9 +207,26 @@ A full sync now fetches all saves and states in two API calls instead of two per
 | `PUSH_NEW_MODE` | auto | new local files → RomM: `auto` or `confirm` (ask for every new file) |
 | `PULL_MODE` | auto | RomM → folder: `auto`, `confirm` or `off` |
 | `BACKUP_RETENTION_DAYS` | 30 | keep backups of overwritten files this long (`0` = forever) |
+| `DELETE_MODE` | auto | a synced file deleted on one side: `auto` (remove the other copy too, into the recycle bin), `ask`, or `off` (never delete; asks to re-download/re-upload) |
+| `RECYCLE_RETENTION_DAYS` | 30 | clear recycle bin items after this many days (`0` = never) |
 | `DATA_FOLDER` → `/data` | `./data` | sync history, pending approvals, backups. **Keep this persistent**, it's how changes on each side are told apart |
 | `PUID` / `PGID` | — | owner of files written into the sync folders (Unraid: `99` / `100`) |
 | `FILE_MODE` | 0777 | permissions for files and folders written into the sync folders and backups (also on the Settings page) |
+
+### Recycle bin
+
+![Recycle bin page listing deleted saves with Download, Restore and Delete buttons](docs/screenshots/recycle.png)
+
+When you delete a synced save or state on one side, the copy on the other side is deleted as well. It isn't destroyed: it's moved to the **Recycle bin** (`/data/recycle`) first.
+- Delete a save in your sync folder → it's downloaded from RomM into the bin, then removed from RomM (all of RomM's versions of it).
+- Delete a save in RomM → the local file (and its screenshot) is moved into the bin.
+
+On the Recycle bin page you can **Restore** an item (it goes back into your sync folder and the next sync uploads it to RomM again), **Download** it, **Delete** it forever, or **Empty recycle bin**. Items are cleared automatically after `RECYCLE_RETENTION_DAYS` (Settings → *Clear the recycle bin after*; `0` = never).
+
+Safety rails:
+- Only deletes a file that is **unchanged** on the other side since the last sync. If it was changed there, you're asked instead.
+- If more than **10** files would be deleted in one sync (a folder unmounted, a share offline…), nothing is deleted. They're listed under **Needs attention → Deletions** with *Delete all* / *Bring all back*.
+- Set `DELETE_MODE=ask` to confirm every delete, or `off` to never carry deletions over.
 
 ### Web UI
 

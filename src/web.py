@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from .sync_state import STATE
 
 STATIC_DIR = Path(__file__).parent / "web_static"
-VALID_DECISIONS = {"approve", "reject", "local", "romm", "both"}
+VALID_DECISIONS = {"approve", "reject", "local", "romm", "both", "restore"}
 
 
 class Decision(BaseModel):
@@ -120,6 +120,8 @@ def create_app(cfg) -> FastAPI:
             "dry_run": cfg.DRY_RUN,
         }
         from .version import get_version, UPDATES, REPO
+        from . import recycle as rb
+        snap["recycle_count"] = len(rb.entries())
         snap["version"] = {"app": get_version(), "repo": REPO, "romm": STATE.romm_version, **UPDATES.info()}
         return JSONResponse(snap)
 
@@ -145,6 +147,8 @@ def create_app(cfg) -> FastAPI:
             if decision not in ("local", "romm", "both"):
                 return False, "Conflicts must be resolved with local, romm or both."
             return SyncEngine().execute(action, choice=decision)
+        if decision == "restore" and action.kind in ("delete_romm", "delete_local"):
+            return SyncEngine().execute(action, choice="restore")
         if decision != "approve":
             return False, f"'{decision}' is not valid for this item."
         return SyncEngine().execute(action)
@@ -309,6 +313,61 @@ def create_app(cfg) -> FastAPI:
         if not f.exists():
             raise HTTPException(404, "No log file yet")
         return FileResponse(f, filename="romm_sync.log", media_type="text/plain")
+    # endregion
+
+    # region recycle bin
+    from . import recycle as rb
+
+    def _chown(p):
+        if cfg.PUID is not None and cfg.PGID is not None:
+            try:
+                import os as _os
+                _os.chown(p, cfg.PUID, cfg.PGID)
+            except OSError:
+                pass
+
+    @app.get("/api/recycle")
+    def recycle_list():
+        return {"entries": rb.entries(), "retention_days": int(cfg.RECYCLE_RETENTION_DAYS),
+                "delete_mode": cfg.DELETE_MODE}
+
+    @app.post("/api/recycle/empty")
+    def recycle_empty():
+        n = rb.empty()
+        STATE.add_activity("INFO", f"Recycle bin emptied ({n} item(s) deleted for good)")
+        return {"ok": True, "removed": n}
+
+    @app.post("/api/recycle/{eid}/restore")
+    def recycle_restore(eid: str):
+        try:
+            dest = rb.restore(eid, cfg.FILE_MODE, _chown)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        STATE.add_activity("INFO", f"Restored {dest} from the recycle bin")
+        if STATE.request_sync_callback:
+            STATE.request_sync_callback()  # uploads it to RomM again
+        return {"ok": True, "message": f"Restored to {dest}. It will be uploaded to RomM on this sync."}
+
+    @app.post("/api/recycle/{eid}/delete")
+    def recycle_delete(eid: str):
+        if not rb.remove(eid):
+            raise HTTPException(404, "Not in the recycle bin")
+        return {"ok": True}
+
+    @app.get("/api/recycle/{eid}/download")
+    def recycle_download(eid: str):
+        e = rb.get(eid)
+        if e is None:
+            raise HTTPException(404)
+        return FileResponse(rb.path_of(e), filename=e["file_name"], media_type="application/octet-stream")
+
+    @app.get("/api/recycle/{eid}/screenshot")
+    def recycle_shot(eid: str):
+        e = rb.get(eid)
+        p = rb.path_of(e).with_name(e["file_name"] + ".png") if e else None
+        if not p or not p.exists():
+            raise HTTPException(404)
+        return FileResponse(p, media_type="image/png")
     # endregion
 
     # region settings & notifications

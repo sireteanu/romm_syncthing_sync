@@ -180,18 +180,32 @@ class Decision:
 
 
 def decide(local: Optional[LocalFile], remote: Optional[dict], baseline: Optional[dict],
-           push_new_mode: str = "auto", pull_mode: str = "auto", force: bool = False) -> Decision:
-    """Pure decision function — see module docstring. Kept free of I/O so it is easy to test."""
+           push_new_mode: str = "auto", pull_mode: str = "auto", force: bool = False,
+           delete_mode: str = "auto", remote_ids: Optional[set] = None) -> Decision:
+    """Pure decision function — see module docstring. Kept free of I/O so it is easy to test.
+
+    remote_ids: ids of every RomM save/state for this ROM. A file only counts as deleted on RomM when the
+    RomM entry it was synced with is really gone (not just renamed or re-mapped)."""
     pull_on = pull_mode != "off"
     pull_auto = pull_mode == "auto"
 
     if local and not remote:
         if baseline and baseline.get("romm_id"):
+            gone = remote_ids is None or baseline["romm_id"] not in remote_ids
+            if gone and delete_mode != "off" and local.hash == baseline.get("local_hash"):
+                return Decision("delete_local", delete_mode == "auto",
+                                "Deleted on RomM since the last sync, so the copy in your sync folder is moved "
+                                "to the recycle bin.")
             return Decision("push_new", False, "This file was synced before but is now missing on RomM. "
                                                "Upload it again, or skip if it was deleted on purpose.")
         return Decision("push_new", push_new_mode == "auto", "New in your sync folder; not on RomM yet.")
 
     if remote and not local:
+        if baseline and delete_mode != "off" and remote.get("id") == baseline.get("romm_id") \
+                and same_time(remote.get("updated_at"), baseline.get("romm_updated_at")):
+            return Decision("delete_romm", delete_mode == "auto",
+                            "Deleted from your sync folder since the last sync, so RomM's copy is moved to the "
+                            "recycle bin.")
         if not pull_on:
             return Decision(None)
         if baseline:
@@ -273,7 +287,11 @@ class SyncEngine:
         from .library_classes import LibraryScanner
         items = list(remote["save"].get(rom_id, [])) + list(remote["state"].get(rom_id, []))
         out: Dict[str, Dict[str, dict]] = {"save": {}, "state": {}}
+        groups: Dict[str, list] = {}
+        for it in items:  # every RomM version of a file (5.x keeps several), so a delete removes them all
+            groups.setdefault(local_name_for_remote(it, rom_row), []).append((it.get("_api"), it["id"]))
         for name, it in cls._latest_by_name(items, rom_row).items():
+            it["_group"] = groups.get(name, [(it.get("_api"), it["id"])])
             _, ftype = LibraryScanner.parse_save_filename(name)
             out["state" if ftype in ("state", "state_screen") else "save"][name] = it
         return out
@@ -308,7 +326,8 @@ class SyncEngine:
     def reconcile(self, games: List[Game], srv=None, discover_remote: bool = False, force: bool = False,
                   all_games: Optional[List[Game]] = None) -> dict:
         """Compare local vs RomM for the given games; run automatic actions, queue the rest."""
-        summary = {"pushed": 0, "pulled": 0, "queued": 0, "conflicts": 0, "in_sync": 0, "errors": 0, "unmatched": 0}
+        summary = {"pushed": 0, "pulled": 0, "deleted": 0, "queued": 0, "conflicts": 0, "in_sync": 0, "errors": 0,
+                   "unmatched": 0}
         pull_mode = self.pull_mode
         if self.cfg.PULL_MODE != "off" and pull_mode == "off":
             logger.warning("PULL_MODE is enabled but the sync folders are mounted read-only. "
@@ -329,6 +348,7 @@ class SyncEngine:
 
         self._claimed: Dict[str, str] = {}  # file key -> "platform folder" that owns it in this run
         self._evaluated: set = set()         # file keys looked at in this run
+        self._auto_deletes: List[PendingAction] = []
         self._local_names: Dict[str, set] = {}  # platform folder -> local game names (incl. unmatched)
         for g in (all_games if all_games is not None else games):
             self._local_names.setdefault(g.platform.lower(), set()).add(g.name)
@@ -352,8 +372,9 @@ class SyncEngine:
                 logger.error(f"Sync failed for {game.name}: {e}")
                 STATE.update_game(self.snapshot(game, {}, {}, error=str(e)))
 
-        if discover_remote and pull_mode != "off" and srv is not None:
+        if discover_remote and srv is not None:
             self._discover_remote_only(remote, seen_rom_ids, srv, pull_mode, summary)
+        self._run_auto_deletes(summary)
 
         if discover_remote:
             # Full sync: anything still queued that this sync didn't come across any more (file renamed,
@@ -373,6 +394,7 @@ class SyncEngine:
         local = self.local_files(game)
         file_status: Dict[str, str] = {}
         remote_by_type = self._remote_for_rom(remote, game.romm_id, game.romm_row)
+        remote_ids = {it["id"] for it in remote["save"].get(game.romm_id, []) + remote["state"].get(game.romm_id, [])}
         from .library_classes import LibraryScanner
         other_local = self._local_names.get(game.platform.lower(), set()) - {game.name}
 
@@ -407,7 +429,8 @@ class SyncEngine:
                 continue
             self._claimed[key] = game.platform
             STATE.clear_error(f"dup:{game.platform}:{key}")
-            d = decide(lf, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode, force)
+            d = decide(lf, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode, force,
+                       self.cfg.DELETE_MODE, remote_ids)
 
             if d.kind is None:
                 STATE.drop_pending_for_key(key)
@@ -424,6 +447,10 @@ class SyncEngine:
                 continue
 
             action = self._build_action(d, game, ft, name, lf, rf)
+            if d.auto and d.kind.startswith("delete"):
+                self._auto_deletes.append(action)   # run after the loop (mass-delete guard)
+                file_status[f"{ft}:{name}"] = "pending"
+                continue
             if d.auto:
                 STATE.drop_pending_for_key(key)  # e.g. queued by an older "confirm" setting
                 ok, msg = self.execute(action)
@@ -460,6 +487,7 @@ class SyncEngine:
             romm_hash=rf.get("content_hash") if rf else None,
             romm_screenshot=shot.get("download_path") if isinstance(shot, dict) else None,
             romm_api=rf.get("_api") if rf else None,
+            romm_group=[list(x) for x in rf.get("_group", [])] if rf else None,
             reason=d.reason,
         )
 
@@ -494,11 +522,14 @@ class SyncEngine:
                         continue
                     key = file_key(ft, rom_id, name)
                     self._evaluated.add(key)
-                    d = decide(None, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode)
+                    d = decide(None, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode,
+                               delete_mode=self.cfg.DELETE_MODE)
                     if d.kind is None:
                         continue
                     action = self._build_action(d, game, ft, name, None, rf)
-                    if d.auto:
+                    if d.auto and d.kind.startswith("delete"):
+                        self._auto_deletes.append(action)
+                    elif d.auto:
                         ok, _ = self.execute(action)
                         summary["pulled" if ok else "errors"] += 1
                     elif not STATE.is_dismissed(key, action.kind, None, action.romm_updated_at):
@@ -508,6 +539,28 @@ class SyncEngine:
                 snap = self.snapshot(shown, files, {}, error=None)
                 snap["status"] = "romm-only"
                 STATE.update_game(snap)
+
+    DELETE_GUARD = 10  # more automatic deletions than this in one sync -> ask instead
+
+    def _run_auto_deletes(self, summary):
+        actions = self._auto_deletes
+        self._auto_deletes = []
+        if not actions:
+            return
+        if len(actions) > self.DELETE_GUARD:
+            logger.warning(f"{len(actions)} synced files disappeared at once. Not deleting anything automatically; "
+                           "they're waiting for your decision.")
+            for a in actions:
+                a.reason = (f"{len(actions)} files disappeared in one sync, which is unusual, so nothing was deleted "
+                            f"automatically. {a.reason}")
+                if not STATE.is_dismissed(a.key, a.kind, a.local_hash, a.romm_updated_at):
+                    STATE.queue(a, persist=False)
+                    summary["queued"] += 1
+            return
+        for a in actions:
+            STATE.drop_pending_for_key(a.key)
+            ok, _ = self.execute(a)
+            summary["deleted" if ok else "errors"] += 1
 
     # region execution
     def execute(self, action: PendingAction, choice: Optional[str] = None) -> Tuple[bool, str]:
@@ -532,6 +585,19 @@ class SyncEngine:
                     msg = self._push(action)
                 elif action.kind in ("pull_new", "pull_update"):
                     msg = self._pull(action)
+                elif action.kind in ("delete_romm", "delete_local") and choice == "restore":
+                    # "Bring it back" instead of deleting: copy the surviving side over again
+                    if action.kind == "delete_romm":
+                        action.kind = "pull_new"
+                        msg = self._pull(action)
+                    else:
+                        action.kind = "push_new"
+                        action.romm_id = None
+                        msg = self._push(action)
+                elif action.kind == "delete_romm":
+                    msg = self._delete_on_romm(action)
+                elif action.kind == "delete_local":
+                    msg = self._delete_local(action)
                 else:
                     raise ValueError(f"Unknown action {action.kind}")
                 logger.info(f"✔ {msg}")
@@ -622,6 +688,71 @@ class SyncEngine:
         new_hash = hashlib.md5(content).hexdigest()
         STATE.set_baseline(action.key, new_hash, item.get("updated_at"), item.get("id"), item.get("content_hash"))
         return f"Downloaded {action.file_type} {dest.name} from RomM"
+
+    def _expected_local_path(self, action: PendingAction) -> Path:
+        root = self.cfg.sync_dir_for(action.file_type)
+        dest = root / action.platform / action.file_name
+        if dest.resolve().parent != (root / action.platform).resolve():
+            raise ValueError(f"Refusing unsafe file name {action.file_name!r}")
+        return dest
+
+    def _delete_on_romm(self, action: PendingAction) -> str:
+        """The file was deleted from the sync folder: keep RomM's copy in the recycle bin, then delete it on RomM."""
+        from . import recycle
+        item = self._check_remote_unchanged(action)
+        local_path = Path(action.local_path) if action.local_path else self._expected_local_path(action)
+        if local_path.exists():
+            raise StaleAction(f"{local_path.name} is back in your sync folder, so nothing was deleted.")
+        if self.cfg.DRY_RUN:
+            return f"[dry run] would move {action.file_name} from RomM to the recycle bin"
+        api = action.romm_api or KIND_API[action.file_type]
+        content = self.romm.download_asset(api, item)
+        shot = None
+        if isinstance(item.get("screenshot"), dict) and item["screenshot"].get("download_path"):
+            try:
+                r = self.romm.get_raw(item["screenshot"]["download_path"])
+                shot = r.content if r.ok else None
+            except Exception:
+                shot = None
+        recycle.add(file_name=action.file_name, file_type=action.file_type, game=action.game, platform=action.platform,
+                    rom_id=action.rom_id, deleted_from="romm", reason="Deleted from your sync folder",
+                    content=content, screenshot=shot, restore_path=str(local_path), file_mode=self.cfg.FILE_MODE)
+        group = action.romm_group or [[api, action.romm_id]]
+        by_api: Dict[str, list] = {}
+        for g_api, g_id in group:
+            by_api.setdefault(g_api or api, []).append(g_id)
+        for g_api, ids in by_api.items():
+            self.romm.delete_assets(g_api, ids)
+        with STATE.lock:
+            STATE.baselines.pop(action.key, None)
+        STATE.save()
+        extra = f" ({len(group)} versions)" if len(group) > 1 else ""
+        return f"Moved {action.file_type} {action.file_name} from RomM to the recycle bin{extra}"
+
+    def _delete_local(self, action: PendingAction) -> str:
+        """The file was deleted on RomM: move the local copy (and its thumbnail) into the recycle bin."""
+        from . import recycle
+        path = self._check_local_unchanged(action)
+        if action.romm_id:
+            import requests
+            r = requests.get(f"{self.romm.url}/api/{action.romm_api or KIND_API[action.file_type]}/{action.romm_id}",
+                             timeout=30, **self.romm._auth_kwargs())
+            if r.status_code == 200:
+                raise StaleAction("The file is still on RomM, so nothing was deleted.")
+        if self.cfg.DRY_RUN:
+            return f"[dry run] would move {path.name} to the recycle bin"
+        png = path.with_name(path.name + ".png")
+        recycle.add(file_name=path.name, file_type=action.file_type, game=action.game, platform=action.platform,
+                    rom_id=action.rom_id, deleted_from="local", reason="Deleted on RomM",
+                    content=path.read_bytes(), screenshot=png.read_bytes() if png.exists() else None,
+                    restore_path=str(path), file_mode=self.cfg.FILE_MODE)
+        path.unlink()
+        if png.exists():
+            png.unlink()
+        with STATE.lock:
+            STATE.baselines.pop(action.key, None)
+        STATE.save()
+        return f"Moved {action.file_type} {path.name} from your sync folder to the recycle bin"
 
     def _upload_conflict_copy(self, action: PendingAction) -> str:
         path = self._check_local_unchanged(action)

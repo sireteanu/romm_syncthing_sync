@@ -33,9 +33,29 @@ def test_new_local_file_confirm_mode():
     assert decide(local(), None, None, push_new_mode="confirm").auto is False
 
 
-def test_local_file_deleted_on_romm_never_auto_uploads():
-    d = decide(local(), None, base(), push_new_mode="auto")
-    assert d.kind == "push_new" and d.auto is False
+def test_deleted_on_romm_moves_local_copy_to_bin():
+    d = decide(local(), None, base(), remote_ids=set())
+    assert d.kind == "delete_local" and d.auto
+
+
+def test_deleted_on_romm_asks_when_mode_is_ask():
+    d = decide(local(), None, base(), delete_mode="ask", remote_ids=set())
+    assert d.kind == "delete_local" and not d.auto
+
+
+def test_deleted_on_romm_but_changed_locally_asks_to_upload_again():
+    d = decide(local("changed"), None, base("aaa"), remote_ids=set())
+    assert d.kind == "push_new" and not d.auto
+
+
+def test_renamed_on_romm_is_not_a_deletion():
+    d = decide(local(), None, base(rid=5), remote_ids={5})  # entry still exists under another name
+    assert d.kind == "push_new" and not d.auto
+
+
+def test_delete_mode_off_keeps_old_behaviour():
+    assert decide(local(), None, base(), delete_mode="off", remote_ids=set()).kind == "push_new"
+    assert decide(None, remote(), base(), delete_mode="off").kind == "pull_new"
 
 
 def test_new_remote_file_respects_pull_mode():
@@ -45,9 +65,14 @@ def test_new_remote_file_respects_pull_mode():
     assert decide(None, remote(), None).auto is True  # default: automatic
 
 
-def test_remote_file_deleted_locally_never_auto_downloads():
-    d = decide(None, remote(), base(), pull_mode="auto")
-    assert d.kind == "pull_new" and d.auto is False
+def test_deleted_locally_moves_romm_copy_to_bin():
+    d = decide(None, remote(t=T0), base("aaa", T0))
+    assert d.kind == "delete_romm" and d.auto
+
+
+def test_deleted_locally_but_changed_on_romm_asks_to_download_again():
+    d = decide(None, remote(t=T0 + timedelta(hours=1)), base("aaa", T0))
+    assert d.kind == "pull_new" and not d.auto
 
 
 # --- both sides, no history -----------------------------------------------

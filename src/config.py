@@ -100,7 +100,11 @@ class Config:
         self.WEB_PASSWORD: str = web_password
 
         # File ownership for files written into the sync folders (Unraid: nobody/users = 99/100)
-        # Permissions for files/folders written into the sync folders and backups (octal, default 0777).
+        # Deletions: carry them to the other side (into the recycle bin), ask first, or never.
+        dm = os.getenv("DELETE_MODE", "auto").lower()
+        self.DELETE_MODE: str = dm if dm in ("auto", "ask", "off") else "auto"
+        self.RECYCLE_RETENTION_DAYS: int = int(os.getenv("RECYCLE_RETENTION_DAYS", "30"))
+                # Permissions for files/folders written into the sync folders and backups (octal, default 0777).
         try:
             self.FILE_MODE: int = int(str(os.getenv("FILE_MODE", "0777")).strip(), 8)
         except ValueError:

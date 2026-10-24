@@ -48,6 +48,8 @@ ACTION_KINDS = {
     "pull_new": "New on RomM → download to folder",
     "pull_update": "RomM is newer → overwrite local copy",
     "conflict": "Both sides changed since last sync",
+    "delete_romm": "Deleted in your sync folder → remove from RomM (to recycle bin)",
+    "delete_local": "Deleted on RomM → remove from your sync folder (to recycle bin)",
 }
 
 
@@ -72,6 +74,7 @@ class PendingAction:
     romm_hash: Optional[str] = None
     romm_screenshot: Optional[str] = None   # RomM download_path of the state screenshot
     romm_api: Optional[str] = None          # RomM list the file is in ("saves"/"states"); may differ from file_type
+    romm_group: Optional[list] = None       # every RomM version of this file [[api, id], ...] (deleted together)
     reason: str = ""
     id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     created_at: str = field(default_factory=utcnow_iso)

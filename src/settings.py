@@ -25,6 +25,11 @@ FIELDS: Dict[str, dict] = {
     "PULL_MODE": {"type": "choice", "choices": ["auto", "confirm", "off"], "group": "sync",
                   "label": "New or changed files on RomM → sync folder",
                   "help": "auto: download right away. confirm: ask first. off: never write to the sync folder."},
+    "DELETE_MODE": {"type": "choice", "choices": ["auto", "ask", "off"], "group": "sync",
+                    "labels": {"auto": "Recycle bin", "ask": "Ask first", "off": "Never"},
+                    "label": "When a synced file is deleted on one side",
+                    "help": "Recycle bin: remove it on the other side too, keeping a copy in the recycle bin. "
+                            "Ask first: wait for your decision. Never: offer to bring it back instead."},
     "ROMM_POLL_INTERVAL_SECONDS": {"type": "int", "min": 0, "max": 86400, "unit": "seconds", "group": "timing",
                                    "label": "Check RomM for changes every",
                                    "help": "Watch mode: how often changes made on RomM (other devices) are picked up. "
@@ -37,6 +42,9 @@ FIELDS: Dict[str, dict] = {
     "BACKUP_RETENTION_DAYS": {"type": "int", "min": 0, "max": 3650, "unit": "days", "group": "backups",
                               "label": "Keep backups of overwritten files for",
                               "help": "0 = keep forever. Backups are in /data/backups."},
+    "RECYCLE_RETENTION_DAYS": {"type": "int", "min": 0, "max": 3650, "unit": "days", "group": "backups",
+                               "label": "Empty the recycle bin after",
+                               "help": "Deleted files are kept this long, then removed for good. 0 = keep forever."},
     "FILE_MODE": {"type": "choice", "choices": [0o777, 0o666, 0o775, 0o664], "group": "backups",
                   "labels": {"511": "0777", "438": "0666", "509": "0775", "436": "0664"},
                   "label": "Permissions for files written to your sync folders",
