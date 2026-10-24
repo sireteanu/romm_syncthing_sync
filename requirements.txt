@@ -9,6 +9,7 @@ uvicorn>=0.29
 # testing
 flake8
 pytest
+httpx  # FastAPI TestClient (tests)
 black>=24.0.0
 isort>=5.13.0
 pylint>=3.0.0
