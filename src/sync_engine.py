@@ -126,9 +126,35 @@ def same_time(a, b) -> bool:
     return abs((da - db).total_seconds()) < 1
 
 
-def local_name_for_remote(item: dict) -> str:
-    """Name a RomM save/state should have in the sync folder (strip RomM 5.x version tags)."""
-    return _VERSION_TAG.sub("", item["file_name"])
+def local_name_for_remote(item: dict, rom_row: Optional[dict] = None) -> str:
+    """Name a RomM save/state should have in the sync folder.
+
+    RetroArch only loads saves/states named after the ROM file, but RomM 5.x's own players and other
+    devices store them under other names: a version tag ("Game [2026-08-17_19-02-17].srm"), a slot name
+    ("Game.autosave.state0"), or no game name at all ("autosave.srm"). Strip the tag, and if what's left
+    doesn't name this ROM, rename it to the ROM's file name + the save/state extension:
+        "autosave [2026-08-17_19-02-17].srm"                 -> "Mario's Picross (USA, Europe).srm"
+        "Mario's Picross (USA, Europe).autosave.state0"      -> "Mario's Picross (USA, Europe).state0"
+        "Panzer Dragoon Saga (USA).bcr" (ROM "... (Disc 1)")  -> unchanged (multi-disc .m3u name)
+    """
+    name = _VERSION_TAG.sub("", item["file_name"])
+    if not rom_row:
+        return name
+    from .library_classes import LibraryScanner
+    game_name, ftype = LibraryScanner.parse_save_filename(name)
+    if not game_name or not ftype or LibraryScanner.find_rom(game_name, [rom_row]) is not None:
+        return name
+    rom_stem = rom_row.get("fs_name_no_ext") or os.path.splitext(rom_row.get("fs_name") or "")[0]
+    if not rom_stem:
+        return name
+    suffix = name[len(game_name):]  # ".srm", ".state0", ".state.auto", ".autosave.state0" ...
+    if ftype in ("state", "state_screen"):
+        m = re.search(r"\.state(?:\d+|\.auto)?(?:\.png)?$", suffix)
+        suffix = m.group(0) if m else suffix
+        suffix = re.sub(r"^\.state0(?=$|\.png$)", ".state", suffix)  # RetroArch's slot 0 is ".state"
+    else:
+        suffix = os.path.splitext(name)[1]
+    return rom_stem + suffix
 
 
 def file_key(file_type: str, rom_id: int, name: str) -> str:
@@ -239,10 +265,11 @@ class SyncEngine:
         return out
 
     @staticmethod
-    def _latest_by_name(items: List[dict]) -> Dict[str, dict]:
+    def _latest_by_name(items: List[dict], rom_row: Optional[dict] = None) -> Dict[str, dict]:
+        """RomM files by the name they get in the sync folder; if several map to one name, the newest wins."""
         latest: Dict[str, dict] = {}
         for it in items:
-            name = local_name_for_remote(it)
+            name = local_name_for_remote(it, rom_row)
             cur = latest.get(name)
             if cur is None or (parse_dt(it.get("updated_at")) or datetime.min.replace(tzinfo=timezone.utc)) > \
                     (parse_dt(cur.get("updated_at")) or datetime.min.replace(tzinfo=timezone.utc)):
@@ -286,6 +313,7 @@ class SyncEngine:
             STATE.update_game(self.snapshot(g, {}, {}, error=None))
 
         self._claimed: Dict[str, str] = {}  # file key -> "platform folder" that owns it in this run
+        self._evaluated: set = set()         # file keys looked at in this run
         if discover_remote:  # full sync: duplicate warnings are re-detected from scratch
             with STATE.lock:
                 for k in [k for k in STATE.errors if k.startswith("dup:")]:
@@ -308,6 +336,16 @@ class SyncEngine:
         if discover_remote and pull_mode != "off" and srv is not None:
             self._discover_remote_only(remote, seen_rom_ids, srv, pull_mode, summary)
 
+        if discover_remote:
+            # Full sync: anything still queued that this sync didn't come across any more (file renamed,
+            # game re-matched, queued by an older version...) is stale.
+            with STATE.lock:
+                stale = [a for a in STATE.pending.values() if a.status == "pending" and a.key not in self._evaluated]
+                for a in stale:
+                    del STATE.pending[a.id]
+            if stale:
+                logger.info(f"Removed {len(stale)} queued item(s) that no longer apply.")
+
         STATE.save()
         save_hash_cache()
         return summary
@@ -315,7 +353,7 @@ class SyncEngine:
     def _reconcile_game(self, game: Game, remote, pull_mode, force, summary):
         local = self.local_files(game)
         file_status: Dict[str, str] = {}
-        remote_by_type = {ft: self._latest_by_name(remote[ft].get(game.romm_id, [])) for ft in ("save", "state")}
+        remote_by_type = {ft: self._latest_by_name(remote[ft].get(game.romm_id, []), game.romm_row) for ft in ("save", "state")}
 
         names = set(local.keys())
         for ft in ("save", "state"):
@@ -325,6 +363,7 @@ class SyncEngine:
             lf = local.get((ft, name))
             rf = remote_by_type[ft].get(name)
             key = file_key(ft, game.romm_id, name)
+            self._evaluated.add(key)
 
             # Two system folders that point at the same RomM platform (e.g. "md" and "megadrive") and contain
             # the same game would fight over one RomM file. Sync the first, report the second.
@@ -369,7 +408,7 @@ class SyncEngine:
                 if STATE.is_dismissed(key, action.kind, action.local_hash, action.romm_updated_at):
                     file_status[f"{ft}:{name}"] = "skipped"
                     continue
-                STATE.queue(action)
+                STATE.queue(action, persist=False)  # saved once at the end of the sync
                 file_status[f"{ft}:{name}"] = "conflict" if d.kind == "conflict" else "pending"
                 summary["conflicts" if d.kind == "conflict" else "queued"] += 1
 
@@ -414,8 +453,9 @@ class SyncEngine:
                 game_name = row.get("fs_name_no_ext") or Path(row["fs_name"]).stem
                 game = Game(name=game_name, path=folder / game_name, platform=folder.name)
                 game.set_romm_data(row)
-                for name, rf in self._latest_by_name(items).items():
+                for name, rf in self._latest_by_name(items, row).items():
                     key = file_key(ft, rom_id, name)
+                    self._evaluated.add(key)
                     d = decide(None, rf, STATE.get_baseline(key), self.cfg.PUSH_NEW_MODE, pull_mode)
                     if d.kind is None:
                         continue
@@ -424,9 +464,9 @@ class SyncEngine:
                         ok, _ = self.execute(action)
                         summary["pulled" if ok else "errors"] += 1
                     elif not STATE.is_dismissed(key, action.kind, None, action.romm_updated_at):
-                        STATE.queue(action)
+                        STATE.queue(action, persist=False)
                         summary["queued"] += 1
-                snap = self.snapshot(game, {ft: self._latest_by_name(items)}, {}, error=None)
+                snap = self.snapshot(game, {ft: self._latest_by_name(items, row)}, {}, error=None)
                 snap["status"] = "romm-only"
                 existing = STATE.games.get(f"{game.platform}/{game.name}")
                 if existing is None:

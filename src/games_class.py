@@ -52,7 +52,7 @@ class Game:
     path: Path  # local filepath
     platform: str  # Platform folder name (always set from parent directory)
     local_save_files: list[SaveFile] = field(default_factory=list)  # objects containing local save file info
-    local_state_files: dict[int, SaveState] = field(default_factory=dict)  # objects containing local state file info, keyed by slot
+    local_state_files: dict[str, SaveState] = field(default_factory=dict)  # local state files, keyed by file name
 
     # Romm server-side game data
     romm_save_files: List[SaveFile] = field(default_factory=list)
@@ -109,7 +109,8 @@ class Game:
             else:
                 save_slot = -1   # -1 is an auto-save from Retroarch
 
-            self.local_state_files[save_slot] = SaveState(path=state_path, platform_id=self.romm_platform_id, modified_at=state_mtime,
+            # keyed by file name: ".state" and ".state0" are both "slot 0" and must not hide each other
+            self.local_state_files[state_path.name] = SaveState(path=state_path, platform_id=self.romm_platform_id, modified_at=state_mtime,
                                                           slot=save_slot, screenshot=screenshot_path, emulator=None)
             logger.debug(f"Found state: {state_path.name} for {self.name}{screenshot_string}")
 

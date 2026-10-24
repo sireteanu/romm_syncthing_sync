@@ -310,7 +310,11 @@ def seed_demo():
     # only on RomM -> pull_new
     S.add_asset("saves", 22, "Moonlit Harbor (USA).srm", b"moonlit-save", now() - timedelta(hours=20))
     S.add_asset("states", 22, "Moonlit Harbor (USA).state1", b"moonlit-state", now() - timedelta(hours=20), with_screenshot=True)
-    # conflict (state store seeds a baseline that both sides have moved past)
+    # files written by RomM 5.x's own player / other devices (slot names, version tags, no game name)
+    S.add_asset("states", 13, "Lantern Keep (USA) [2026-10-21_10-00-00].autosave.state0", b"lantern-slot0", now() - timedelta(hours=5), with_screenshot=True)
+    S.add_asset("states", 13, "Lantern Keep (USA) [2026-10-21_11-00-00].autosave.state.auto", b"lantern-auto", now() - timedelta(hours=4))
+    S.add_asset("saves", 42, "autosave [2026-10-22_09-00-00].srm", b"orbit-from-web-player", now() - timedelta(hours=2))
+        # conflict (state store seeds a baseline that both sides have moved past)
     S.add_asset("saves", 31, "Crystal Caverns (USA).srm", b"crystal-save-romm-edit", now() - timedelta(hours=1))
     S.add_asset("states", 31, "Crystal Caverns (USA).state3", b"crystal-state-romm", now() - timedelta(hours=1), with_screenshot=True)
 

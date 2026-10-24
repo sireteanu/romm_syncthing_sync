@@ -149,6 +149,25 @@ def create_app(cfg) -> FastAPI:
             return False, f"'{decision}' is not valid for this item."
         return SyncEngine().execute(action)
 
+    # NOTE: must be registered before "/api/actions/{action_id}", otherwise "bulk" is taken as an action id.
+    @app.post("/api/actions/bulk")
+    def decide_bulk(body: BulkDecision):
+        if body.decision not in VALID_DECISIONS:
+            raise HTTPException(400, "Invalid decision")
+
+        def run():
+            done = 0
+            for aid in body.ids:
+                ok, _ = _apply(aid, body.decision)
+                done += ok
+            STATE.add_activity("INFO", f"Bulk {body.decision}: {done}/{len(body.ids)} item(s) completed")
+            if STATE.request_sync_callback and body.decision != "reject":
+                STATE.request_sync_callback()
+
+        threading.Thread(target=run, name="bulk-actions", daemon=True).start()
+        return {"ok": True, "queued": len(body.ids)}
+
+
     @app.post("/api/actions/{action_id}")
     def decide(action_id: str, body: Decision):
         if body.decision not in VALID_DECISIONS:
@@ -173,23 +192,6 @@ def create_app(cfg) -> FastAPI:
     def errors_dismiss(body: Dict[str, str]):
         STATE.clear_error(body.get("key", ""))
         return {"ok": True}
-
-    @app.post("/api/actions/bulk")
-    def decide_bulk(body: BulkDecision):
-        if body.decision not in VALID_DECISIONS:
-            raise HTTPException(400, "Invalid decision")
-
-        def run():
-            done = 0
-            for aid in body.ids:
-                ok, _ = _apply(aid, body.decision)
-                done += ok
-            STATE.add_activity("INFO", f"Bulk {body.decision}: {done}/{len(body.ids)} item(s) completed")
-            if STATE.request_sync_callback and body.decision != "reject":
-                STATE.request_sync_callback()
-
-        threading.Thread(target=run, name="bulk-actions", daemon=True).start()
-        return {"ok": True, "queued": len(body.ids)}
 
     # region platforms
     from . import platforms as pf
@@ -289,6 +291,24 @@ def create_app(cfg) -> FastAPI:
         if STATE.request_sync_callback:
             STATE.request_sync_callback()
         return _platforms_payload()
+    # endregion
+
+    # region logs
+    from .sync_state import read_log, log_file
+
+    @app.get("/api/logs")
+    def logs(level: str = "INFO", q: str = "", limit: int = 1000):
+        limit = max(50, min(int(limit), 5000))
+        with STATE.lock:
+            history = list(STATE.history)
+        return {"entries": read_log(level, q, limit), "history": history, "file": str(log_file())}
+
+    @app.get("/api/logs/download")
+    def logs_download():
+        f = log_file()
+        if not f.exists():
+            raise HTTPException(404, "No log file yet")
+        return FileResponse(f, filename="romm_sync.log", media_type="text/plain")
     # endregion
 
     # region settings & notifications

@@ -265,3 +265,44 @@ def test_notifications_are_not_repeated(monkeypatch):
     finally:
         with STATE.lock:
             STATE.pending.pop(a.id, None)
+
+
+# --- RomM 5.x file names from other devices (real examples) ---------------------------
+def test_romm_names_are_renamed_to_the_rom_file_name():
+    picross = {"fs_name": "Mario's Picross (USA, Europe).gb", "fs_name_no_ext": "Mario's Picross (USA, Europe)"}
+    panzer = {"fs_name": "Panzer Dragoon Saga (USA) (Disc 1).chd", "fs_name_no_ext": "Panzer Dragoon Saga (USA) (Disc 1)"}
+    metroid = {"fs_name": "Super Metroid (Japan, USA).sfc", "fs_name_no_ext": "Super Metroid (Japan, USA)"}
+    n = local_name_for_remote
+    assert n({"file_name": "autosave [2026-08-17_19-02-17].srm"}, picross) == "Mario's Picross (USA, Europe).srm"
+    assert n({"file_name": "Mario's Picross (USA, Europe) [2026-09-19_06-12-01].srm"}, picross) == "Mario's Picross (USA, Europe).srm"
+    assert n({"file_name": "Mario's Picross (USA, Europe) [2026-08-17_15-51-41].autosave.state0"}, picross) == "Mario's Picross (USA, Europe).state"  # RetroArch slot 0
+    assert n({"file_name": "Mario's Picross (USA, Europe) [2026-09-08_17-34-35].autosave.state.auto"}, picross) == "Mario's Picross (USA, Europe).state.auto"
+    assert n({"file_name": "Mario's Picross (USA, Europe).state1"}, picross) == "Mario's Picross (USA, Europe).state1"
+    assert n({"file_name": "freegosy [2026-10-18_00-15-29].srm"}, metroid) == "Super Metroid (Japan, USA).srm"
+    assert n({"file_name": "Super Metroid (Japan, USA) [2026-10-17_05-17-38].freegosy.state.auto"}, metroid) == "Super Metroid (Japan, USA).state.auto"
+    assert n({"file_name": "Panzer Dragoon Saga (USA).bcr"}, panzer) == "Panzer Dragoon Saga (USA).bcr"  # m3u name kept
+
+
+def test_multi_disc_prefix_tie_break_prefers_disc_1():
+    roms = [_rom("Panzer Dragoon Saga (USA) (Disc 2).chd", 2), _rom("Panzer Dragoon Saga (USA) (Disc 1).chd", 1)]
+    assert LibraryScanner.find_rom("Panzer Dragoon Saga (USA)", roms)["id"] == 1
+
+
+def test_bulk_route_is_not_swallowed_by_single_action_route():
+    from fastapi.testclient import TestClient
+    from src.web import create_app
+    cfg = SimpleNamespace(ROMM_CREDENTIALS=SimpleNamespace(url="http://x", auth_type="api"), WEB_USERNAME="",
+                          WEB_PASSWORD="", SAVE_SYNC_DIR=None, STATE_SYNC_DIR=None, ALL_SYNC_DIR=None, PLATFORM_MAP_PATH=None)
+    r = TestClient(create_app(cfg)).post("/api/actions/bulk", json={"ids": [], "decision": "approve"})
+    assert r.status_code == 200 and r.json().get("queued") == 0
+
+
+def test_state_and_state0_are_both_kept(tmp_path):
+    d = tmp_path / "snes"
+    d.mkdir()
+    (d / "Game (USA).state").write_bytes(b"a")
+    (d / "Game (USA).state0").write_bytes(b"b")
+    lib = LocalLibrary([tmp_path])
+    lib.build_local_library()
+    (game,) = lib.games.values()
+    assert len(game.local_state_files) == 2

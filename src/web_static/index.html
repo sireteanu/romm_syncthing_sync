@@ -73,6 +73,7 @@ header.top .wrap{display:flex;align-items:center;gap:14px;height:58px;padding-bo
 @keyframes pulse{50%{opacity:.35}}
 .btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line-strong);background:var(--surface);padding:8px 14px;border-radius:var(--r-md);cursor:pointer;font-weight:600;white-space:nowrap;transition:background .15s var(--ease),border-color .15s var(--ease)}
 .btn:hover{background:var(--surface-hover)}
+a.btn{text-decoration:none;color:var(--text)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
 .btn.danger{color:var(--bad)} .btn.ok{color:var(--ok)}
@@ -214,6 +215,19 @@ details.activity summary::-webkit-details-marker{display:none}
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--panel);color:var(--text);border:1px solid var(--line-strong);box-shadow:var(--shadow);padding:10px 16px;border-radius:var(--r-md);font-weight:600;transition:all .25s;z-index:60;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
+/* logs view */
+.logbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:14px 16px;border-bottom:1px solid var(--line)}
+.logbox{font-family:var(--mono);font-size:12px;height:min(62vh,640px);overflow:auto;padding:8px 0}
+.logbox .e{display:grid;grid-template-columns:150px 72px 1fr;gap:10px;padding:2px 16px;color:var(--muted)}
+.logbox .e:hover{background:var(--surface-2)}
+.logbox .m{color:var(--text);white-space:pre-wrap;word-break:break-word}
+.logbox .lv-WARNING{color:var(--warn)} .logbox .lv-ERROR,.logbox .lv-CRITICAL{color:var(--bad)} .logbox .lv-DEBUG{opacity:.7}
+.logbox mark{background:var(--accent-bg);color:var(--text);border-radius:3px}
+.hist{width:100%;border-collapse:collapse;font-size:12.5px}
+.hist td,.hist th{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.hist th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.hist td.f{font-family:var(--mono);font-size:12px;word-break:break-all}
+@media (max-width:860px){ .logbox .e{grid-template-columns:1fr} .hist .h-res{display:none} }
 /* settings view */
 .set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px;align-items:start}
 .set-card{padding:18px 20px}
@@ -301,7 +315,7 @@ html,body{overflow-x:hidden}
     <div>romm_sync<a class="ver" id="ver" target="_blank" rel="noopener" title="Release notes"></a> <small id="romm-url"></small></div>
     <a class="upd" id="upd" target="_blank" rel="noopener" hidden></a>
   </div>
-  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a><a href="#settings" data-view="set">Settings</a></nav>
+  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a><a href="#logs" data-view="log">Logs</a><a href="#settings" data-view="set">Settings</a></nav>
   <div class="spacer"></div>
   <span class="pill" id="conn"><span class="dot"></span><span>connecting…</span></span>
   <span class="pill" id="mode-pill" title="Sync mode"></span>
@@ -357,7 +371,7 @@ html,body{overflow-x:hidden}
 
   <section>
     <details class="card activity" id="activity">
-      <summary>Activity <span class="count" id="act-count" style="font-weight:500"></span><span class="spacer"></span><span style="color:var(--muted);font-size:12px">show / hide</span></summary>
+      <summary>Activity <span class="count" id="act-count" style="font-weight:500"></span><span class="spacer"></span><a href="#logs" style="font-size:12px;font-weight:600;margin-right:12px" onclick="event.stopPropagation()">Open full log →</a><span style="color:var(--muted);font-size:12px">show / hide</span></summary>
       <div class="log" id="log"></div>
     </details>
   </section>
@@ -399,6 +413,26 @@ html,body{overflow-x:hidden}
     </div>
   </section>
   <datalist id="pf-options"></datalist>
+</main>
+
+<main class="wrap" id="view-log" hidden>
+  <section>
+    <h2>Recent actions <span class="count" id="hist-count">0</span></h2>
+    <div class="card" style="overflow:auto;max-height:340px"><table class="hist"><thead><tr><th>When</th><th>Result</th><th>Action</th><th>Game</th><th>File</th><th class="h-res">Details</th></tr></thead><tbody id="hist-rows"></tbody></table></div>
+  </section>
+  <section>
+    <h2>Log</h2>
+    <div class="card">
+      <div class="logbar">
+        <div class="seg-ctl" id="log-level"><button data-l="DEBUG">All</button><button data-l="INFO" class="on">Info</button><button data-l="WARNING">Warnings</button><button data-l="ERROR">Errors</button></div>
+        <div class="search" style="min-width:180px"><span style="color:var(--faint)">⌕</span><input id="log-q" placeholder="Filter log…" autocomplete="off"></div>
+        <label class="chk" style="padding:0"><input type="checkbox" id="log-follow" checked><span>Live</span></label>
+        <a class="btn small" href="api/logs/download" download>Download log</a>
+      </div>
+      <div class="logbox" id="log-box"><div class="empty">Loading…</div></div>
+      <div style="padding:8px 16px;color:var(--faint);font-size:12px;border-top:1px solid var(--line)" id="log-file"></div>
+    </div>
+  </section>
 </main>
 
 <main class="wrap" id="view-set" hidden>
@@ -977,13 +1011,48 @@ function renderNotify(){
   };
 }
 
+// ---------- logs view ----------
+const lg = { level:"INFO", q:"", timer:null, lastHash:"" };
+const KIND_LABEL = {push_new:"Upload (new)", push_update:"Upload", pull_new:"Download (new)", pull_update:"Download", conflict:"Conflict"};
+async function loadLogs(){
+  clearTimeout(lg.timer);
+  if (location.hash !== "#logs") return;
+  try {
+    const d = await api(`api/logs?level=${lg.level}&q=${encodeURIComponent(lg.q)}&limit=1500`);
+    const h = hashOf([d.entries.length, d.entries.slice(-1), d.history.length, d.history[0]]);
+    if (h !== lg.lastHash) {
+      lg.lastHash = h;
+      $("#hist-count").textContent = d.history.length;
+      $("#hist-rows").innerHTML = d.history.map(a => {
+        const cls = a.status==="done"?"ok":a.status==="failed"?"bad":a.status==="stale"?"warn":"";
+        const label = {done:"Done", failed:"Failed", stale:"Skipped (changed)", dismissed:"Skipped by you"}[a.status] || a.status;
+        return `<tr><td style="white-space:nowrap">${when(a.finished_at)}</td><td><span class="chip ${cls}">${esc(label)}</span></td><td>${esc(KIND_LABEL[a.kind]||a.kind)}</td>
+          <td>${esc(a.game)}<div style="color:var(--muted)">${esc(a.platform)}</div></td><td class="f">${esc(a.file_name)}</td><td class="h-res">${esc(a.result||"")}</td></tr>`;
+      }).join("") || `<tr><td colspan="6" class="empty">Nothing yet. Uploads, downloads and your decisions show up here.</td></tr>`;
+      const box = $("#log-box"); const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      const q = lg.q.trim();
+      const hl = t => { const e = esc(t); if (!q) return e; const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"); return e.replace(re, m => `<mark>${m}</mark>`); };
+      box.innerHTML = d.entries.map(e => `<div class="e lv-${e.level}"><span>${esc(e.t)}</span><span>${esc(e.level)}</span><span class="m">${hl(e.msg)}</span></div>`).join("")
+        || `<div class="empty">${q ? "No log lines match this filter." : "The log is empty."}</div>`;
+      if (atBottom || !box.dataset.init) { box.scrollTop = box.scrollHeight; box.dataset.init = 1; }
+      $("#log-file").textContent = `Showing the latest ${d.entries.length.toLocaleString()} matching lines · full log: ${d.file} (rotated at 5 MB, last 5 kept)`;
+    }
+  } catch(e) { $("#log-box").innerHTML = `<div class="notice bad" style="margin:12px">${esc(e.message)}</div>`; }
+  if ($("#log-follow").checked) lg.timer = setTimeout(loadLogs, 3000);
+}
+$("#log-level").querySelectorAll("button").forEach(b => b.onclick = () => {
+  $("#log-level").querySelectorAll("button").forEach(x => x.classList.toggle("on", x===b)); lg.level = b.dataset.l; lg.lastHash=""; loadLogs(); });
+let logQT = null; $("#log-q").oninput = e => { clearTimeout(logQT); logQT = setTimeout(() => { lg.q = e.target.value; lg.lastHash=""; loadLogs(); }, 250); };
+$("#log-follow").onchange = () => loadLogs();
+
 // ---------- routing ----------
 function route(){
-  const view = location.hash === "#platforms" ? "plat" : location.hash === "#settings" ? "set" : "dash";
-  $("#view-dash").hidden = view!=="dash"; $("#view-plat").hidden = view!=="plat"; $("#view-set").hidden = view!=="set";
+  const view = {"#platforms":"plat", "#settings":"set", "#logs":"log"}[location.hash] || "dash";
+  $("#view-dash").hidden = view!=="dash"; $("#view-plat").hidden = view!=="plat"; $("#view-set").hidden = view!=="set"; $("#view-log").hidden = view!=="log";
   document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.dataset.view === view));
   if (view==="plat") loadPlatforms();
   if (view==="set") loadSettings();
+  if (view==="log") { lg.lastHash = ""; loadLogs(); }
 }
 window.addEventListener("hashchange", route);
 window.addEventListener("beforeunload", e => { if (Object.keys(pf.edits).length || Object.keys(sv.edits).length || sv.reset.size || sv.notifDirty) { e.preventDefault(); e.returnValue = ""; } });

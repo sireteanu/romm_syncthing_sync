@@ -12,6 +12,7 @@ apart from "both sides changed" (a conflict that needs a human decision).
 from __future__ import annotations
 
 import json
+import re
 import os
 import threading
 import uuid
@@ -138,6 +139,7 @@ class AppState:
                 raw = json.loads(self._state_file.read_text())
                 self.baselines = raw.get("baselines", {})
                 self.dismissed = raw.get("dismissed", {})
+                self.history.extend(raw.get("history", [])[:self.MAX_HISTORY])
                 for a in raw.get("pending", []):
                     a.pop("key", None)
                     a.pop("kind_label", None)
@@ -155,6 +157,7 @@ class AppState:
                 "version": 1,
                 "baselines": self.baselines,
                 "dismissed": self.dismissed,
+                "history": list(self.history),
                 "pending": [a.to_dict() for a in self.pending.values() if a.status == "pending"],
             }
         tmp = self._state_file.with_suffix(".tmp")
@@ -242,11 +245,15 @@ class AppState:
     # endregion
 
     # region pending
-    def queue(self, action: PendingAction) -> PendingAction:
+    def queue(self, action: PendingAction, persist: bool = True) -> PendingAction:
         """Add (or refresh) a pending action. One pending action per file key."""
         with self.lock:
             for existing in list(self.pending.values()):
-                if existing.key == action.key and existing.status == "pending":
+                if existing.key != action.key:
+                    continue
+                if existing.status == "running":
+                    return existing  # being handled right now (e.g. approved a moment ago): don't re-queue
+                if existing.status == "pending":
                     # Keep the id stable so an open dialog in the GUI still works, refresh data.
                     action.id = existing.id
                     action.created_at = existing.created_at
@@ -256,7 +263,8 @@ class AppState:
         if is_new:
             self.add_activity("WARNING" if action.kind == "conflict" else "INFO",
                               f"Waiting for approval: {ACTION_KINDS[action.kind]} — {action.platform}/{action.file_name}")
-        self.save()
+        if persist:
+            self.save()
         return action
 
     def dismiss(self, action: "PendingAction"):
@@ -396,10 +404,56 @@ class ProgressReporter:
             logger.info(detail)
 
 
+def log_dir() -> Path:
+    d = data_dir() / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def log_file() -> Path:
+    return log_dir() / "romm_sync.log"
+
+
 def install_log_sink():
-    """Mirror INFO+ log lines into the GUI activity feed."""
+    """Mirror INFO+ log lines into the GUI activity feed, and keep a rotating log file in DATA_DIR/logs."""
     def sink(message):
         rec = message.record
         if STATE is not None:
             STATE.add_activity(rec["level"].name, rec["message"])
     logger.add(sink, level="INFO", format="{message}")
+    level = os.getenv("LOG_LEVEL", "INFO").upper()
+    try:
+        logger.add(str(log_file()), level="DEBUG" if level in ("DEBUG", "TRACE") else "INFO",
+                   format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+                   rotation="5 MB", retention=5, encoding="utf-8", enqueue=True)
+    except Exception as e:
+        logger.warning(f"Couldn't open the log file in {log_dir()}: {e}")
+
+
+_LEVEL_RANK = {"TRACE": 5, "DEBUG": 10, "INFO": 20, "SUCCESS": 25, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+_LINE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \| (\w+)\s*\| (.*)$")
+
+
+def read_log(min_level: str = "INFO", query: str = "", limit: int = 1000, max_bytes: int = 4_000_000) -> List[dict]:
+    """Newest `limit` matching entries from the log file (multi-line entries kept together), oldest first."""
+    path = log_file()
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - max_bytes))
+        text = f.read().decode("utf-8", "replace")
+    if size > max_bytes:
+        text = text.split("\n", 1)[-1]  # drop the partial first line
+    entries: List[dict] = []
+    for line in text.splitlines():
+        m = _LINE.match(line)
+        if m:
+            entries.append({"t": m.group(1), "level": m.group(2), "msg": m.group(3)})
+        elif entries and line.strip():
+            entries[-1]["msg"] += "\n" + line
+    rank = _LEVEL_RANK.get(min_level.upper(), 20)
+    q = query.casefold().strip()
+    out = [e for e in entries if _LEVEL_RANK.get(e["level"], 20) >= rank and (not q or q in e["msg"].casefold())]
+    return out[-limit:]

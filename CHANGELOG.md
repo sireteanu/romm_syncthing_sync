@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.6.0 — logs page, queue fixes
+
+### Added
+- **Logs** page:
+  - the full log with level filter (All / Info / Warnings / Errors), search with highlighting, live updates and **Download log**
+  - **Recent actions**: what was uploaded, downloaded or skipped, and why anything failed. Kept across restarts.
+- The log is written to `/data/logs/romm_sync.log` (rotated at 5 MB, 5 files kept).
+
+### Fixed
+- **Download all / Upload all / Skip all did nothing.** The bulk request was being handled as a single item called "bulk". This bug had been there since 2.0.
+- **Files from RomM 5.x's own player and other devices kept coming back to the queue.** Names like `autosave [date].srm` or `Game [date].autosave.state0` were downloaded under those names, which RetroArch can't use and the app couldn't match back to the game. They're now renamed to the ROM's file name (`Game (USA).srm`, `Game (USA).state`).
+- `Game.state` and `Game.state0` both counted as "slot 0", so one hid the other. Local states are now tracked by file name.
+- A sync running while an approved item was still being processed could queue that item again.
+- Queued items that no longer apply (game re-matched, file renamed, queued by an older version) are removed on the next full sync.
+- Multi-disc games pick "(Disc 1)" consistently when the save name matches several discs.
+- Comparing large libraries is much faster: the state file is saved once per sync instead of once per queued item.
+
 ## 2.5.0 — settings, notifications, speed, matching, RomM look
 
 ### Added

@@ -630,7 +630,8 @@ class LibraryScanner:
                 prefix.append(g)
         if not prefix:
             return None
-        best = min(prefix, key=lambda g: len(g.get('fs_name') or ""))
+        # Closest (shortest) name wins; ties are broken alphabetically so it's stable, e.g. "(Disc 1)" before "(Disc 2)".
+        best = min(prefix, key=lambda g: (len(g.get('fs_name') or ""), g.get('fs_name') or ""))
         if len(prefix) > 1:
             logger.info(f"{save_name}: no exact ROM name match; closest of {len(prefix)} candidates is {best['fs_name']}")
         return best
