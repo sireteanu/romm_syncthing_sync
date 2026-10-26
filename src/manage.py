@@ -173,7 +173,9 @@ def _run(action: str, rows: List[dict]):
                 fn = {"delete": _delete, "prune": _prune, "download": _download, "upload": _upload}[action]
                 ok, msg = fn(eng, r)
             except Exception as e:  # noqa: BLE001
-                ok, msg = False, str(e)
+                from .sync_engine import explain_error
+                ok, msg = False, explain_error(e, _action(r, "push_new" if action in ("upload", "delete", "prune")
+                                                          else "pull_new"))
                 logger.error(f"✘ {action} {r['name']} failed: {e}")
             with _lock:
                 _job["done"] += 1

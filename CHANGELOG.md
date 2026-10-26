@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.10.1
+
+### Fixed
+- When RomM's database is missing a table (its update didn't finish), the error now says so and how to fix it, instead of showing RomM's raw database error. Failures on the Saves page use the same plain explanations as the rest of the app.
+
 ## 2.10.0 — version history, Syncthing, per-system switches
 
 ### Added

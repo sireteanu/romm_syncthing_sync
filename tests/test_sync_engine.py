@@ -453,3 +453,12 @@ def test_own_delete_is_ignored(monkeypatch):
     api.own_changes[("saves", 1)] = None
     p.check()
     assert orch.targeted == [] and orch.full == 1
+
+
+def test_missing_romm_table_is_explained():
+    from src.sync_engine import explain_error
+    from src.sync_state import PendingAction
+    a = PendingAction(kind="push_new", file_type="save", game="G", platform="nds", rom_id=1, file_name="G.sav")
+    e = RuntimeError("""RomM returned 500: {"detail":"(mariadb.ProgrammingError) Table 'romm.deleted_assets' doesn't exist"}""")
+    msg = explain_error(e, a)
+    assert "deleted_assets" in msg and "migration" in msg

@@ -923,6 +923,13 @@ def explain_error(e: Exception, action: PendingAction) -> str:
         return "RomM rejected the file as too large. Check the upload size limit of RomM or your reverse proxy."
     if code == 409:
         return "RomM reported a conflict with an existing file. It will be re-checked on the next sync."
+    missing = re.search(r"Table '[^.']+\.(\w+)' doesn't exist|relation \"(\w+)\" does not exist", text)
+    if missing:
+        table = missing.group(1) or missing.group(2)
+        return (f"RomM's database is missing the '{table}' table, so RomM can't save or delete files. Its database "
+                "update (migration) didn't finish when RomM was last updated. Look for \"Failed to run database "
+                "migrations\" in RomM's container log, fix the cause, and restart RomM; it retries the update on "
+                "every start. Nothing was changed on either side.")
     if code and code >= 500:
         return f"RomM had an internal error ({code}). Check RomM's logs; it will be retried on the next sync."
     if "back up" in text:
