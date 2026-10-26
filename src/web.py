@@ -41,6 +41,11 @@ class BulkDecision(BaseModel):
     decision: str
 
 
+class SavesAction(BaseModel):
+    action: str
+    ids: List[str]
+
+
 class MappingUpdate(BaseModel):
     choices: Dict[str, Optional[str]]  # folder -> RomM slug, or None to remove the mapping
 
@@ -314,6 +319,32 @@ def create_app(cfg) -> FastAPI:
             raise HTTPException(404, "No log file yet")
         return FileResponse(f, filename="romm_sync.log", media_type="text/plain")
     # endregion
+
+    # region saves page
+    from . import manage
+
+    @app.get("/api/saves")
+    def saves_list():
+        try:
+            rows = manage.inventory()
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+        except Exception as e:
+            raise HTTPException(502, f"Couldn't read the saves list: {e}")
+        return {"rows": rows, "job": manage.job_status(), "dry_run": bool(cfg.DRY_RUN)}
+
+    @app.get("/api/saves/job")
+    def saves_job():
+        return manage.job_status()
+
+    @app.post("/api/saves/action")
+    def saves_action(body: SavesAction):
+        try:
+            return manage.start(body.action, body.ids)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except RuntimeError as e:
+            raise HTTPException(409, str(e))
 
     # region recycle bin
     from . import recycle as rb

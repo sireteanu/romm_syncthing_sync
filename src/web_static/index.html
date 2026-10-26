@@ -227,6 +227,19 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
 .hist td,.hist th{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 .hist th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
 .hist td.f{font-family:var(--mono);font-size:12px;word-break:break-all}
+.sv-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:0 20px 14px}
+.sv-tools .inp{width:auto}
+.sv-sel{position:sticky;top:0;z-index:5;display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 20px;background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.sv-sel .muted{color:var(--muted)}
+.sv-table td{vertical-align:middle}
+.sv-table tr.g td{background:var(--surface-2);padding-top:10px;padding-bottom:10px}
+.sv-table tr.g .gn{font-weight:600;font-size:13px}
+.sv-table tr.f:hover td{background:var(--surface-2)}
+.sv-table input[type=checkbox]{accent-color:var(--accent);width:15px;height:15px;cursor:pointer}
+.sv-table .side{white-space:nowrap;color:var(--muted)}
+.sv-table .side b{color:var(--text);font-weight:500}
+.sv-table .none{color:var(--faint)}
+@media (max-width:760px){.sv-table .h-sm{display:none}.sv-tools .inp,.sv-tools .search{width:100%}}
 @media (max-width:860px){ .logbox .e{grid-template-columns:1fr} .hist .h-res{display:none} }
 /* settings view */
 .set-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:16px;align-items:start}
@@ -317,7 +330,7 @@ html,body{overflow-x:hidden}
     <div>romm_sync<a class="ver" id="ver" target="_blank" rel="noopener" title="Release notes"></a> <small id="romm-url"></small></div>
     <a class="upd" id="upd" target="_blank" rel="noopener" hidden></a>
   </div>
-  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a><a href="#recycle" data-view="bin">Recycle bin <span class="n" id="nav-bin" style="background:var(--surface-hover);color:var(--text)" hidden></span></a><a href="#logs" data-view="log">Logs</a><a href="#settings" data-view="set">Settings</a></nav>
+  <nav class="nav"><a href="#" data-view="dash" class="on">Dashboard</a><a href="#saves" data-view="sav">Saves</a><a href="#platforms" data-view="plat">Platforms <span class="n" id="nav-unmapped" hidden></span></a><a href="#recycle" data-view="bin">Recycle bin <span class="n" id="nav-bin" style="background:var(--surface-hover);color:var(--text)" hidden></span></a><a href="#logs" data-view="log">Logs</a><a href="#settings" data-view="set">Settings</a></nav>
   <div class="spacer"></div>
   <span class="pill" id="conn"><span class="dot"></span><span>connecting…</span></span>
   <span class="pill" id="mode-pill" title="Sync mode"></span>
@@ -416,6 +429,37 @@ html,body{overflow-x:hidden}
     </div>
   </section>
   <datalist id="pf-options"></datalist>
+</main>
+
+<main class="wrap" id="view-sav" hidden>
+  <section>
+    <div class="card">
+      <div class="pf-head">
+        <div style="flex:1;min-width:260px">
+          <h3>Saves</h3>
+          <p>Every save and state in your sync folders and on RomM. Tick files or whole games, then choose what to do with them. Deleted files go to the <a href="#recycle">recycle bin</a> first.</p>
+        </div>
+        <button class="btn" id="sv-reload">Reload</button>
+      </div>
+      <div class="sv-tools">
+        <div class="search" style="min-width:200px"><span style="color:var(--faint)">⌕</span><input id="sv-q" placeholder="Search games or files…" autocomplete="off"></div>
+        <select class="inp" id="sv-sys"><option value="">All systems</option></select>
+        <select class="inp" id="sv-type"><option value="">Saves &amp; states</option><option value="save">Saves only</option><option value="state">States only</option></select>
+        <div class="seg-ctl" id="sv-where" style="flex-wrap:wrap"><button data-w="" class="on">All</button><button data-w="both">In both</button><button data-w="folder">Folder only</button><button data-w="romm">RomM only</button><button data-w="different">Different</button><button data-w="versions">Old versions</button></div>
+      </div>
+      <div class="sv-sel" id="sv-sel">
+        <span id="sv-count" class="muted">Loading…</span><span class="spacer" style="flex:1"></span>
+        <button class="btn small" id="sv-dl" disabled>Download to folder</button>
+        <button class="btn small" id="sv-ul" disabled>Upload to RomM</button>
+        <button class="btn small" id="sv-prune" disabled>Remove old RomM versions</button>
+        <button class="btn small danger" id="sv-del" disabled>Delete</button>
+        <button class="btn small" id="sv-clear" disabled>Clear selection</button>
+      </div>
+      <div id="sv-job" hidden style="padding:12px 20px;border-bottom:1px solid var(--line)"><div class="progress-meta"><span id="sv-job-text"></span><span id="sv-job-n"></span></div><div class="bar" style="margin:8px 0 0"><i id="sv-job-bar"></i></div></div>
+      <div style="overflow:auto"><table class="hist sv-table"><thead><tr><th style="width:28px"><input type="checkbox" id="sv-all" title="Select everything shown"></th><th>File</th><th class="h-sm">In your folder</th><th class="h-sm">On RomM</th><th>Status</th></tr></thead><tbody id="sv-rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody></table></div>
+      <div id="sv-more" style="padding:12px 20px;text-align:center" hidden><button class="btn small" id="sv-more-btn">Show more games</button></div>
+    </div>
+  </section>
 </main>
 
 <main class="wrap" id="view-bin" hidden>
@@ -1057,7 +1101,7 @@ async function loadBin(){
     $("#bin-empty").disabled = !d.entries.length;
     $("#bin-rows").innerHTML = d.entries.map(e => {
       const left = ret ? Math.max(0, Math.ceil(ret - (Date.now() - new Date(e.deleted_at)) / 86400000)) : null;
-      const what = e.deleted_from==="romm" ? "You deleted it in your sync folder → removed from RomM" : "Deleted on RomM → removed from your sync folder";
+      const what = e.note || (e.deleted_from==="romm" ? "You deleted it in your sync folder → removed from RomM" : "Deleted on RomM → removed from your sync folder");
       return `<tr><td>${e.has_screenshot?`<div class="thumb" style="width:52px;height:40px;border-radius:6px;background:var(--surface-2) url('api/recycle/${e.id}/screenshot') center/cover"></div>`:""}</td>
         <td class="f">${esc(e.file_name)}<div style="color:var(--muted);font-family:var(--font)">${e.file_type}</div></td>
         <td>${esc(e.game)}<div style="color:var(--muted)">${esc(e.platform)}</div></td>
@@ -1087,9 +1131,115 @@ $("#bin-empty").onclick = async () => {
   try { const r = await api("api/recycle/empty", {method:"POST"}); toast(`Deleted ${r.removed} item(s) for good`); loadBin(); } catch(e){ toast("⚠ "+e.message); }
 };
 
+// ---------- saves page ----------
+const sv2 = { rows:[], loaded:false, sel:new Set(), where:"", q:"", sys:"", type:"", limit:150, jobTimer:null, retention:null };
+const SV_STATUS = {both:["ok","In sync"], different:["warn","Different"], folder:["info","Folder only"], romm:["accent","RomM only"]};
+async function loadSaves(){
+  sv2.loaded = true;
+  $("#sv-count").textContent = "Reading your folders and RomM…";
+  $("#sv-rows").innerHTML = `<tr><td colspan="5" class="empty">Loading…</td></tr>`;
+  try {
+    const d = await api("api/saves");
+    sv2.rows = d.rows;
+    const ids = new Set(d.rows.map(r=>r.id)); sv2.sel = new Set([...sv2.sel].filter(i=>ids.has(i)));
+    const systems = [...new Set(d.rows.map(r=>r.system))].sort((a,b)=>a.localeCompare(b));
+    $("#sv-sys").innerHTML = `<option value="">All systems</option>` + systems.map(s=>`<option ${s===sv2.sys?"selected":""}>${esc(s)}</option>`).join("");
+    if (d.job && d.job.running) watchSavesJob();
+    renderSaves();
+  } catch(e) { sv2.loaded = false; $("#sv-count").textContent = ""; $("#sv-rows").innerHTML = `<tr><td colspan="5"><div class="notice bad">${esc(e.message)}</div></td></tr>`; }
+}
+function svFiltered(){
+  const q = sv2.q.trim().toLowerCase();
+  return sv2.rows.filter(r => (!sv2.sys || r.system===sv2.sys) && (!sv2.type || r.type===sv2.type)
+    && (!sv2.where || (sv2.where==="versions" ? (r.romm && r.romm.versions>1) : r.status===sv2.where))
+    && (!q || r.game.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)));
+}
+function svGroups(rows){
+  const m = new Map();
+  for (const r of rows){ const k = r.platform+"|"+r.game; if(!m.has(k)) m.set(k,{key:k,game:r.game,system:r.system,platform:r.platform,rows:[]}); m.get(k).rows.push(r); }
+  return [...m.values()];
+}
+function renderSaves(){
+  const rows = svFiltered(), groups = svGroups(rows), shown = groups.slice(0, sv2.limit);
+  const side = (x, isR) => !x ? `<span class="none">—</span>` : `<b>${size(x.size)}</b> · ${ago(isR ? x.updated_at : x.mtime)}${isR && x.versions>1 ? ` <span class="chip warn" title="RomM keeps a copy of every upload">${x.versions} versions</span>` : ""}`;
+  $("#sv-rows").innerHTML = shown.map(g => {
+    const all = g.rows.every(r=>sv2.sel.has(r.id)), some = g.rows.some(r=>sv2.sel.has(r.id));
+    return `<tr class="g"><td><input type="checkbox" data-sg="${esc(g.key)}" ${all?"checked":""} ${!all&&some?"data-ind=1":""}></td><td colspan="4"><span class="gn">${esc(g.game)}</span> <span style="color:var(--muted)">· ${esc(g.system)} · ${plural(g.rows.length,"file")}</span></td></tr>`
+      + g.rows.map(r => { const [c,l] = SV_STATUS[r.status]; return `<tr class="f"><td><input type="checkbox" data-sr="${r.id}" ${sv2.sel.has(r.id)?"checked":""}></td>
+        <td class="f">${esc(r.name)}<div style="color:var(--muted);font-family:var(--font)">${r.type}${r.matched?"":" · not matched to a RomM game"}</div></td>
+        <td class="side h-sm">${side(r.local,false)}</td><td class="side h-sm">${side(r.romm,true)}</td><td><span class="chip ${c}">${l}</span></td></tr>`; }).join("");
+  }).join("") || `<tr><td colspan="5" class="empty">${sv2.rows.length ? "Nothing matches these filters." : "No saves or states found."}</td></tr>`;
+  document.querySelectorAll("[data-ind]").forEach(c => c.indeterminate = true);
+  $("#sv-more").hidden = groups.length <= sv2.limit;
+  const byKey = Object.fromEntries(groups.map(g=>[g.key,g]));
+  document.querySelectorAll("[data-sg]").forEach(c => c.onchange = () => { byKey[c.dataset.sg].rows.forEach(r => c.checked ? sv2.sel.add(r.id) : sv2.sel.delete(r.id)); renderSaves(); });
+  document.querySelectorAll("[data-sr]").forEach(c => c.onchange = () => { c.checked ? sv2.sel.add(c.dataset.sr) : sv2.sel.delete(c.dataset.sr); svUpdateBar(); renderGroupBoxes(); });
+  $("#sv-all").checked = rows.length>0 && rows.every(r=>sv2.sel.has(r.id));
+  svUpdateBar(rows, groups);
+}
+function renderGroupBoxes(){ renderSaves(); }
+function svSelected(){ const m = Object.fromEntries(sv2.rows.map(r=>[r.id,r])); return [...sv2.sel].map(i=>m[i]).filter(Boolean); }
+function svUpdateBar(rows, groups){
+  rows = rows || svFiltered(); groups = groups || svGroups(rows);
+  const s = svSelected(), busy = $("#sv-job").hidden === false;
+  const dl = s.filter(r=>r.can_download), ul = s.filter(r=>r.can_upload), pr = s.filter(r=>r.romm && r.romm.versions>1);
+  const old = rows.filter(r=>r.romm && r.romm.versions>1).reduce((n,r)=>n+r.romm.versions-1,0);
+  $("#sv-count").innerHTML = s.length ? `<b style="color:var(--text)">${s.length.toLocaleString()}</b> selected` :
+    `${rows.length.toLocaleString()} files · ${groups.length.toLocaleString()} games${old?` · ${old.toLocaleString()} old RomM versions`:""}`;
+  const set = (id, n, label) => { const b=$(id); b.disabled = busy || !n; b.textContent = n ? `${label} (${n})` : label; };
+  set("#sv-dl", dl.length, "Download to folder"); set("#sv-ul", ul.length, "Upload to RomM");
+  set("#sv-prune", pr.length, "Remove old RomM versions"); set("#sv-del", s.length, "Delete");
+  $("#sv-clear").disabled = !s.length;
+}
+async function svRun(action, list, confirmOpts){
+  if (confirmOpts && !(await confirmBox(confirmOpts))) return;
+  try { await api("api/saves/action", {method:"POST", body:JSON.stringify({action, ids:list.map(r=>r.id)})}); sv2.sel.clear(); watchSavesJob(); }
+  catch(e){ toast("⚠ "+e.message); }
+}
+function watchSavesJob(){
+  clearTimeout(sv2.jobTimer);
+  const tick = async () => {
+    let j; try { j = await api("api/saves/job"); } catch(e){ sv2.jobTimer = setTimeout(tick, 2000); return; }
+    const label = {delete:"Deleting", prune:"Removing old versions", download:"Downloading", upload:"Uploading"}[j.action] || "Working";
+    $("#sv-job").hidden = !j.running; svUpdateBar();
+    if (j.running){
+      $("#sv-job-text").textContent = `${label}…`; $("#sv-job-n").innerHTML = `<b>${j.done}</b> of <b>${j.total}</b>`;
+      $("#sv-job-bar").style.width = (j.total ? 100*j.done/j.total : 0) + "%";
+      sv2.jobTimer = setTimeout(tick, 1000);
+    } else if (j.action) {
+      if (j.failed) openModal(`<div class="mh"><div><h3>${j.ok} done, ${j.failed} failed</h3></div></div><div class="mb">${j.errors.slice(0,30).map(e=>`<div class="notice bad" style="margin:0 0 8px"><b>${esc(e.game)}</b> · <span style="font-family:var(--mono);font-size:12px">${esc(e.name)}</span><br>${esc(e.message)}</div>`).join("")}</div><div class="mf"><button class="btn" onclick="closeModal()">Close</button></div>`);
+      else toast(`${label} finished: ${plural(j.ok,"file")}`);
+      loadSaves();
+    }
+  };
+  tick();
+}
+$("#sv-reload").onclick = () => loadSaves();
+let svQT=null; $("#sv-q").oninput = e => { clearTimeout(svQT); svQT = setTimeout(()=>{ sv2.q=e.target.value; sv2.limit=150; renderSaves(); }, 200); };
+$("#sv-sys").onchange = e => { sv2.sys=e.target.value; sv2.limit=150; renderSaves(); };
+$("#sv-type").onchange = e => { sv2.type=e.target.value; sv2.limit=150; renderSaves(); };
+$("#sv-where").querySelectorAll("button").forEach(b => b.onclick = () => { $("#sv-where").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)); sv2.where=b.dataset.w; sv2.limit=150; renderSaves(); });
+$("#sv-more-btn").onclick = () => { sv2.limit += 150; renderSaves(); };
+$("#sv-all").onchange = e => { svFiltered().forEach(r => e.target.checked ? sv2.sel.add(r.id) : sv2.sel.delete(r.id)); renderSaves(); };
+$("#sv-clear").onclick = () => { sv2.sel.clear(); renderSaves(); };
+$("#sv-del").onclick = () => {
+  const s = svSelected(); const games = new Set(s.map(r=>r.platform+"|"+r.game)).size;
+  const loc = s.filter(r=>r.local).length, rom = s.filter(r=>r.romm), vers = rom.reduce((n,r)=>n+r.romm.versions,0);
+  svRun("delete", s, {title:`Delete ${plural(s.length,"file")} from ${plural(games,"game")}?`, danger:true, ok:`Delete ${s.length}`,
+    body:`<ul style="margin:0 0 10px;padding-left:18px">${loc?`<li><b>${loc}</b> from your sync folder</li>`:""}${rom.length?`<li><b>${rom.length}</b> from RomM${vers>rom.length?` (${vers} versions)`:""}</li>`:""}</ul>
+    <p style="margin:0;color:var(--muted)">Copies go to the recycle bin first, so you can restore them. Devices that sync this folder will lose these files too.</p>`});
+};
+$("#sv-prune").onclick = () => {
+  const s = svSelected().filter(r=>r.romm && r.romm.versions>1); const n = s.reduce((a,r)=>a+r.romm.versions-1,0);
+  svRun("prune", s, {title:`Remove ${plural(n,"old version")} from RomM?`, ok:"Remove old versions",
+    body:`<p style="margin:0 0 8px">RomM keeps a copy every time a file is uploaded. The newest copy of each of these ${plural(s.length,"file")} stays; the older ones are moved to the recycle bin.</p><p style="margin:0;color:var(--muted)">Your sync folder isn't changed.</p>`});
+};
+$("#sv-dl").onclick = () => { const s = svSelected().filter(r=>r.can_download); svRun("download", s, {title:`Download ${plural(s.length,"file")} into your sync folder?`, ok:"Download", body:`<p style="margin:0;color:var(--muted)">They're copied from RomM into the matching system folder, and kept in sync from then on.</p>`}); };
+$("#sv-ul").onclick = () => { const s = svSelected().filter(r=>r.can_upload); svRun("upload", s, {title:`Upload ${plural(s.length,"file")} to RomM?`, ok:"Upload", body:`<p style="margin:0;color:var(--muted)">They're added to the matching game on RomM, and kept in sync from then on.</p>`}); };
+
 // ---------- logs view ----------
 const lg = { level:"INFO", q:"", timer:null, lastHash:"" };
-const KIND_LABEL = {push_new:"Upload (new)", push_update:"Upload", pull_new:"Download (new)", pull_update:"Download", conflict:"Conflict"};
+const KIND_LABEL = {push_new:"Upload (new)", push_update:"Upload", pull_new:"Download (new)", pull_update:"Download", conflict:"Conflict", delete_romm:"Delete on RomM", delete_local:"Delete in folder", manage_delete:"Delete (Saves page)", manage_prune:"Old versions removed"};
 async function loadLogs(){
   clearTimeout(lg.timer);
   if (location.hash !== "#logs") return;
@@ -1123,7 +1273,8 @@ $("#log-follow").onchange = () => loadLogs();
 
 // ---------- routing ----------
 function route(){
-  const view = {"#platforms":"plat", "#settings":"set", "#logs":"log", "#recycle":"bin"}[location.hash] || "dash";
+  const view = {"#platforms":"plat", "#settings":"set", "#logs":"log", "#recycle":"bin", "#saves":"sav"}[location.hash] || "dash";
+  $("#view-sav").hidden = view!=="sav"; if (view==="sav" && !sv2.loaded) loadSaves();
   $("#view-dash").hidden = view!=="dash"; $("#view-plat").hidden = view!=="plat"; $("#view-set").hidden = view!=="set"; $("#view-log").hidden = view!=="log"; $("#view-bin").hidden = view!=="bin";
   document.querySelectorAll(".nav a").forEach(a => a.classList.toggle("on", a.dataset.view === view));
   if (view==="plat") loadPlatforms();

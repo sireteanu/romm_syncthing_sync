@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.0 — Saves page
+
+### Added
+- **Saves** page: every save and state in your sync folders and on RomM in one list, grouped by game, showing where each file exists, its size and age on each side, how many versions RomM keeps, and whether the copies match.
+  - Filters: search, system, saves/states, *In both* / *Folder only* / *RomM only* / *Different* / *Old versions*.
+  - Select files, whole games or everything shown, then **Delete** (folder and RomM, via the recycle bin), **Remove old RomM versions** (keeps the newest), **Download to folder** or **Upload to RomM**.
+  - Runs in the background with progress, and lists any failures with the reason. Every action shows up under Logs → Recent actions.
+- Recycle bin entries say where they came from (e.g. "Older RomM version from …").
+
 ## 2.8.0 — lets your disks sleep
 
 ### Changed

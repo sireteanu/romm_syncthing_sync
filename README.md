@@ -23,6 +23,7 @@ A utility for syncing emulator save files and save states across your gaming dev
   - **keep the RomM version**
   - **keep both** (your local copy is stored on RomM as a separate `(conflict …)` entry)
 - **Backups.** Before any file is overwritten (on either side), the version being replaced is copied to `/data/backups/<date>/<system>/`.
+- **Saves page.** Every save and state in your sync folders and on RomM in one list, with filters (system, type, folder only / RomM only / different / old versions). Tick files or whole games and delete them everywhere, download or upload them, or clear out the old copies RomM keeps of every upload.
 - **Deletions sync, with a recycle bin.** Delete a save on either side and it's removed from the other too. The removed copy goes to a recycle bin you can restore from; it's cleared after a number of days you choose.
 - **Platforms page** to map your system folders to RomM platforms. It uses RomM's official platform list and folder aliases, fetched from RomM's GitHub.
 - **Logs page.** The full app log, filterable by level and searchable, with live updates and download, plus a list of recent uploads, downloads and decisions. The log is also kept in `/data/logs` (rotated).
@@ -216,6 +217,19 @@ A full sync now fetches all saves and states in two API calls instead of two per
 | `DATA_FOLDER` → `/data` | `./data` | sync history, pending approvals, backups. **Keep this persistent**, it's how changes on each side are told apart |
 | `PUID` / `PGID` | — | owner of files written into the sync folders (Unraid: `99` / `100`) |
 | `FILE_MODE` | 0777 | permissions for files and folders written into the sync folders and backups (also on the Settings page) |
+
+### Saves page
+
+![Saves page listing every save and state with where it exists, filters, and bulk actions](docs/screenshots/saves.png)
+
+The **Saves** page lists every save and state, in your sync folders and on RomM, grouped by game. For each one it shows the size and age of the copy in your folder and on RomM, how many versions RomM holds, and whether the two copies match.
+
+Filter by system, saves or states, or by where a file is (*In both*, *Folder only*, *RomM only*, *Different*, *Old versions*). Tick single files, whole games, or everything shown, then:
+- **Delete**: removes the files from your sync folder **and** RomM (every RomM version). Copies go to the recycle bin first. If the RomM copy differs from yours, both copies are kept in the bin.
+- **Remove old RomM versions**: RomM 5.x keeps a copy every time a file is uploaded. This keeps the newest and moves the older ones to the recycle bin. Your folder isn't changed.
+- **Download to folder** (files only on RomM) and **Upload to RomM** (files only in your folder that are matched to a RomM game).
+
+Bulk actions run in the background with a progress bar; anything that fails is listed with the reason. The page reads your sync folders only when you open or reload it.
 
 ### Recycle bin
 

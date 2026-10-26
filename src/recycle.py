@@ -51,7 +51,7 @@ def _save(entries: List[dict]):
 
 def add(*, file_name: str, file_type: str, game: str, platform: str, rom_id: Optional[int],
         deleted_from: str, reason: str, content: bytes, restore_path: str,
-        screenshot: Optional[bytes] = None, file_mode: int = 0o777) -> dict:
+        screenshot: Optional[bytes] = None, file_mode: int = 0o777, note: str = "") -> dict:
     """Store a copy. deleted_from = which side we removed it from ("romm" or "local")."""
     with _lock:
         eid = uuid.uuid4().hex[:12]
@@ -67,7 +67,8 @@ def add(*, file_name: str, file_type: str, game: str, platform: str, rom_id: Opt
                 pass
         entry = {"id": eid, "file_name": file_name, "file_type": file_type, "game": game, "platform": platform,
                  "rom_id": rom_id, "deleted_from": deleted_from, "reason": reason, "deleted_at": utcnow_iso(),
-                 "size": len(content), "has_screenshot": bool(screenshot), "restore_path": restore_path}
+                 "size": len(content), "has_screenshot": bool(screenshot), "restore_path": restore_path,
+                 "note": note}
         entries = _load()
         entries.append(entry)
         _save(entries)

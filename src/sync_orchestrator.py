@@ -51,6 +51,7 @@ class SyncOrchestrator:
     def __init__(self, local_library: LocalLibrary, romm_server: RetroGameServer):
         """Orchestrator needs to keep and update a single instance of LocalLibrary and RetroGameServer.
         """
+        STATE.orchestrator = self
         self.lcl = local_library
         self.srv = romm_server
         self.app_cfg = get_config()

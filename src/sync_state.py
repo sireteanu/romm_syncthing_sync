@@ -50,6 +50,8 @@ ACTION_KINDS = {
     "conflict": "Both sides changed since last sync",
     "delete_romm": "Deleted in your sync folder → remove from RomM (to recycle bin)",
     "delete_local": "Deleted on RomM → remove from your sync folder (to recycle bin)",
+    "manage_delete": "Deleted from the Saves page (folder and RomM, to recycle bin)",
+    "manage_prune": "Older RomM versions removed (to recycle bin)",
 }
 
 
@@ -137,6 +139,7 @@ class AppState:
 
         # Hook set by the app: called by the GUI "Sync now" button.
         self.request_sync_callback = None
+        self.orchestrator = None  # the running SyncOrchestrator (its libraries feed the Saves page)
 
     # region persistence
     def _load(self):
