@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.11.0 — matching saves with other names
+
+### Added
+- **Matching by title:** a save whose name isn't the ROM's file name now matches a ROM with the same title, ignoring punctuation, region/version tags and articles ("zelda_spirit_tracks", "The Legend of Zelda: Spirit Tracks" and "Legend of Zelda, The - Spirit Tracks (USA) (En,Fr,Es)" are the same). RomM's own game name counts too. Ties are never guessed.
+- **Link a game by hand** on the Saves page (*Not matched* filter → **Link to a RomM game…**), with a search of your RomM library. Each game shows whether it was matched by title or linked, with a **Change** link.
+- Files from RomM for games matched by title or linked are written under your save's name, so the emulator finds them.
+
+### Changed
+- README: the two "known issues" about save names and RomM versions are resolved or explained.
+
 ## 2.10.1
 
 ### Fixed

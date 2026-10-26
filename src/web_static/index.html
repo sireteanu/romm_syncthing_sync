@@ -466,7 +466,7 @@ html,body{overflow-x:hidden}
         <div class="search" style="min-width:200px"><span style="color:var(--faint)">⌕</span><input id="sv-q" placeholder="Search games or files…" autocomplete="off"></div>
         <select class="inp" id="sv-sys"><option value="">All systems</option></select>
         <select class="inp" id="sv-type"><option value="">Saves &amp; states</option><option value="save">Saves only</option><option value="state">States only</option></select>
-        <div class="seg-ctl" id="sv-where" style="flex-wrap:wrap"><button data-w="" class="on">All</button><button data-w="both">In both</button><button data-w="folder">Folder only</button><button data-w="romm">RomM only</button><button data-w="different">Different</button><button data-w="versions">Old versions</button></div>
+        <div class="seg-ctl" id="sv-where" style="flex-wrap:wrap"><button data-w="" class="on">All</button><button data-w="both">In both</button><button data-w="folder">Folder only</button><button data-w="romm">RomM only</button><button data-w="different">Different</button><button data-w="versions">Old versions</button><button data-w="unmatched">Not matched</button></div>
       </div>
       <div class="sv-sel" id="sv-sel">
         <span id="sv-count" class="muted">Loading…</span><span class="spacer" style="flex:1"></span>
@@ -1199,12 +1199,12 @@ async function loadSaves(){
 function svFiltered(){
   const q = sv2.q.trim().toLowerCase();
   return sv2.rows.filter(r => (!sv2.sys || r.system===sv2.sys) && (!sv2.type || r.type===sv2.type)
-    && (!sv2.where || (sv2.where==="versions" ? (r.romm && r.romm.versions>1) : r.status===sv2.where))
+    && (!sv2.where || (sv2.where==="versions" ? (r.romm && r.romm.versions>1) : sv2.where==="unmatched" ? (!r.matched && r.local_game) : r.status===sv2.where))
     && (!q || r.game.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)));
 }
 function svGroups(rows){
   const m = new Map();
-  for (const r of rows){ const k = r.platform+"|"+r.game; if(!m.has(k)) m.set(k,{key:k,game:r.game,system:r.system,platform:r.platform,rows:[]}); m.get(k).rows.push(r); }
+  for (const r of rows){ const k = r.platform+"|"+r.game; if(!m.has(k)) m.set(k,{key:k,game:r.game,system:r.system,platform:r.platform,first:r,rows:[]}); m.get(k).rows.push(r); }
   return [...m.values()];
 }
 function renderSaves(){
@@ -1212,12 +1212,13 @@ function renderSaves(){
   const side = (x, isR) => !x ? `<span class="none">—</span>` : `<b>${size(x.size)}</b> · ${ago(isR ? x.updated_at : x.mtime)}${isR && x.versions>1 ? ` <span class="chip warn" title="RomM keeps a copy of every upload">${x.versions} versions</span>` : ""}`;
   $("#sv-rows").innerHTML = shown.map(g => {
     const all = g.rows.every(r=>sv2.sel.has(r.id)), some = g.rows.some(r=>sv2.sel.has(r.id));
-    return `<tr class="g"><td><input type="checkbox" data-sg="${esc(g.key)}" ${all?"checked":""} ${!all&&some?"data-ind=1":""}></td><td colspan="4"><span class="gn">${esc(g.game)}</span> <span style="color:var(--muted)">· ${esc(g.system)} · ${plural(g.rows.length,"file")}</span></td></tr>`
+    return `<tr class="g"><td><input type="checkbox" data-sg="${esc(g.key)}" ${all?"checked":""} ${!all&&some?"data-ind=1":""}></td><td colspan="4"><span class="gn">${esc(g.game)}</span> <span style="color:var(--muted)">· ${esc(g.system)} · ${plural(g.rows.length,"file")}</span>${svMatchInfo(g)}</td></tr>`
       + g.rows.map(r => { const [c,l] = SV_STATUS[r.status]; return `<tr class="f"><td><input type="checkbox" data-sr="${r.id}" ${sv2.sel.has(r.id)?"checked":""}></td>
         <td class="f"><button class="linkbtn sv-name" data-hist="${r.id}" title="Version history">${esc(r.name)}</button><div style="color:var(--muted);font-family:var(--font)">${r.type}${r.matched?"":" · not matched to a RomM game"}</div></td>
         <td class="side h-sm">${side(r.local,false)}</td><td class="side h-sm">${side(r.romm,true)}</td><td><span class="chip ${c}">${l}</span></td></tr>`; }).join("");
   }).join("") || `<tr><td colspan="5" class="empty">${sv2.rows.length ? "Nothing matches these filters." : "No saves or states found."}</td></tr>`;
   document.querySelectorAll("[data-ind]").forEach(c => c.indeterminate = true);
+  document.querySelectorAll("[data-link]").forEach(b => b.onclick = () => svLink(byKey[b.dataset.link]));
   document.querySelectorAll("[data-hist]").forEach(b => b.onclick = () => svHistory(sv2.rows.find(r=>r.id===b.dataset.hist)));
   $("#sv-more").hidden = groups.length <= sv2.limit;
   const byKey = Object.fromEntries(groups.map(g=>[g.key,g]));
@@ -1227,6 +1228,40 @@ function renderSaves(){
   svUpdateBar(rows, groups);
 }
 function renderGroupBoxes(){ renderSaves(); }
+function svMatchInfo(g){
+  const r = g.first; if (!r.local_game) return "";
+  const k = esc(g.key);
+  if (!r.matched) return ` <span class="chip warn">not matched to a RomM game</span> <button class="linkbtn" data-link="${k}">Link to a RomM game…</button>`;
+  if (r.match_how === "link") return ` <span class="chip accent" title="${esc(r.romm_file||"")}">linked to ${esc(r.romm_name||"")}</span> <button class="linkbtn" data-link="${k}">Change</button>`;
+  if (r.match_how === "title") return ` <span class="chip info" title="${esc(r.romm_file||"")}">matched by title to ${esc(r.romm_file||r.romm_name||"")}</span> <button class="linkbtn" data-link="${k}">Change</button>`;
+  return "";
+}
+function svLink(g){
+  const r = g.first;
+  openModal(`<div class="mh"><div><h3>Link to a RomM game</h3><div style="color:var(--muted)"><b>${esc(g.game)}</b> in <code>${esc(g.platform)}</code></div></div></div>
+    <div class="mb"><p style="margin:0 0 10px;color:var(--muted)">For saves whose name doesn't match the ROM file. Its saves and states sync with the game you pick, and files from RomM are written under this name so your emulator finds them.</p>
+      <div class="row" style="gap:10px;margin-bottom:10px"><div class="search" style="flex:1"><span style="color:var(--faint)">⌕</span><input id="ln-q" placeholder="Search your RomM library…" value="${esc(g.game.replace(/\s*[\(\[].*$/,""))}" autocomplete="off"></div>
+        <label class="chk" style="padding:0"><input type="checkbox" id="ln-all"><span>All systems</span></label></div>
+      <div id="ln-res" style="max-height:340px;overflow:auto"></div></div>
+    <div class="mf">${r.match_how==="link"?`<button class="btn danger" id="ln-rm">Remove link</button><span class="spacer"></span>`:""}<button class="btn" onclick="closeModal()">Cancel</button></div>`, true);
+  let t = null;
+  const search = async () => {
+    try {
+      const d = await api(`api/romm/search?folder=${encodeURIComponent(g.platform)}&q=${encodeURIComponent($("#ln-q").value)}&all=${$("#ln-all").checked}`);
+      $("#ln-res").innerHTML = d.roms.map(x => `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line);gap:10px"><div style="flex:1;min-width:0"><b>${esc(x.name)}</b><div style="color:var(--muted);font-family:var(--mono);font-size:12px;word-break:break-all">${esc(x.fs_name)} · ${esc(x.platform)}</div>${x.used_by && x.id!==r.rom_id?`<div style="color:var(--warn);font-size:12px">already syncs with ${esc(x.used_by)}</div>`:""}</div>
+        <button class="btn small ${x.id===r.rom_id?"":"primary"}" data-pick="${x.id}" ${x.id===r.rom_id||x.used_by?"disabled":""}>${x.id===r.rom_id?"Current":"Link"}</button></div>`).join("") || `<div class="empty">No games found. Try fewer words${$("#ln-all").checked?"":", or tick All systems"}.</div>`;
+      document.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => svDoLink(g, +b.dataset.pick));
+    } catch(e) { $("#ln-res").innerHTML = `<div class="notice bad" style="margin:0">${esc(e.message)}</div>`; }
+  };
+  $("#ln-q").oninput = () => { clearTimeout(t); t = setTimeout(search, 200); };
+  $("#ln-all").onchange = search;
+  if ($("#ln-rm")) $("#ln-rm").onclick = () => svDoLink(g, null);
+  search(); $("#ln-q").focus();
+}
+async function svDoLink(g, romId){
+  try { const r = await api("api/links", {method:"PUT", body:JSON.stringify({platform:g.platform, game:g.game, rom_id:romId})}); closeModal(); toast(r.message); setTimeout(loadSaves, 1500); }
+  catch(e){ toast("⚠ "+e.message); }
+}
 function svSelected(){ const m = Object.fromEntries(sv2.rows.map(r=>[r.id,r])); return [...sv2.sel].map(i=>m[i]).filter(Boolean); }
 function svUpdateBar(rows, groups){
   rows = rows || svFiltered(); groups = groups || svGroups(rows);

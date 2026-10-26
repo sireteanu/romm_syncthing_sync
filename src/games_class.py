@@ -70,6 +70,7 @@ class Game:
     # Match quality indicators
     is_matched: bool = False  # Whether this game was successfully matched to RomM
     match_confidence: float = 1.0  # 0.0-1.0 confidence score for fuzzy matching
+    match_how: Optional[str] = None  # "exact" | "prefix" | "title" (fuzzy title match) | "link" (set by hand)
 
     # # RomM directory paths (set by determine_romm_dirs)
     # romm_saves_dir: Optional[Path] = None

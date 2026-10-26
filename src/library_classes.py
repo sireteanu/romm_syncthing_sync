@@ -579,22 +579,47 @@ class LibraryScanner:
                 by_slug[key] = [g for g in romm_library.library if g['platform_slug'] == key]
             plans.append((game, by_slug[key]))
 
+        # Pass 0: links made by hand on the Saves page (any platform).
+        from . import links as manual_links
+        linked = manual_links.load()
+        by_id = {r['id']: r for r in romm_library.library} if linked else {}
+        rest = []
+        for game, platform_games in plans:
+            rid = linked.get(manual_links.key(game.platform, game.name))
+            if rid is not None and rid in by_id:
+                LibraryScanner._set_match(game, by_id[rid], "link")
+                taken.add(rid)
+            else:
+                rest.append((game, platform_games))
+
         # Pass 1: exact names. Each ROM goes to one local game per system folder pass.
         pending = []
-        for game, platform_games in plans:
+        for game, platform_games in rest:
             match = LibraryScanner.find_rom(game.name, platform_games, exact_only=True)
             if match is not None:
-                game.set_romm_data(match)
+                LibraryScanner._set_match(game, match, "exact")
                 taken.add(match['id'])
             else:
                 pending.append((game, platform_games))
 
         # Pass 2: closest prefix match among ROMs nobody claimed exactly.
+        still = []
         for game, platform_games in pending:
             match = LibraryScanner.find_rom(game.name, platform_games, exclude_ids=taken)
             if match is not None:
-                game.set_romm_data(match)
+                LibraryScanner._set_match(game, match, "prefix")
                 taken.add(match['id'])
+            else:
+                still.append((game, platform_games))
+
+        # Pass 3: same title, ignoring punctuation, region/version tags and "Legend of Zelda, The"-style
+        # articles ("Zelda - Spirit Tracks" won't match, "The Legend of Zelda: Spirit Tracks" will).
+        for game, platform_games in still:
+            match = LibraryScanner.find_rom_by_title(game.name, platform_games, exclude_ids=taken)
+            if match is not None:
+                LibraryScanner._set_match(game, match, "title")
+                taken.add(match['id'])
+                logger.info(f"Matched '{game.name}' to '{match.get('fs_name')}' by title.")
                 continue
             game.is_matched = False
             msg = (f"Could not match {game.name} with platform '{game.platform}' to ROMM server. "
@@ -605,6 +630,62 @@ class LibraryScanner:
             else:
                 LibraryScanner._warned_unmatched.add(warn_key)
                 logger.warning(msg)
+
+    @staticmethod
+    def _set_match(game: Game, row: dict, how: str) -> None:
+        if how in ("title", "link"):
+            # RomM files for this ROM are written under the local game's name, not the ROM file's name,
+            # because that's the name the emulator on your devices uses. (A copy of the row, so other
+            # users of the shared library row aren't affected.)
+            row = dict(row, _local_stem=game.name)
+        game.set_romm_data(row)
+        game.match_how = how
+
+    _TAG = re.compile(r"\s*[\(\[][^\)\]]*[\)\]]")
+    _ARTICLE = re.compile(r"^(.*?),\s*(the|a|an|le|la|les|l'|der|die|das|el|los|las|il)\b(.*)$", re.I)
+
+    @classmethod
+    def title_key(cls, text: str) -> str:
+        """'Legend of Zelda, The - Spirit Tracks (USA) (En,Fr)' and 'The Legend of Zelda: Spirit Tracks'
+        both become 'the legend of zelda spirit tracks'."""
+        t = cls._TAG.sub("", str(text)).strip()
+        m = cls._ARTICLE.match(t)
+        if m:
+            t = f"{m.group(2)} {m.group(1)}{m.group(3)}"
+        t = t.casefold().replace("&", " and ")
+        t = re.sub(r"[\W_]+", " ", t)
+        return " ".join(t.split())
+
+    @classmethod
+    def _tags(cls, text: str) -> set:
+        return {x.strip().casefold() for tag in re.findall(r"[\(\[]([^\)\]]*)[\)\]]", str(text))
+                for x in tag.split(",")}
+
+    @classmethod
+    def find_rom_by_title(cls, save_name: str, platform_games: List[dict],
+                          exclude_ids: Optional[set] = None) -> Optional[dict]:
+        """Unique ROM whose title (file name or RomM name) equals the save's, ignoring tags/punctuation.
+        Several candidates: the one sharing most region/version tags with the save; a tie = no match."""
+        want = cls.title_key(save_name)
+        if not want:
+            return None
+        cands = []
+        for g in platform_games:
+            if exclude_ids and g.get('id') in exclude_ids:
+                continue
+            stem = g.get('fs_name_no_ext') or os.path.splitext(g.get('fs_name') or "")[0]
+            if want in (cls.title_key(stem), cls.title_key(g.get('name') or "")):
+                cands.append(g)
+        if len(cands) <= 1:
+            return cands[0] if cands else None
+        mine = cls._tags(save_name)
+        scored = sorted(((len(mine & cls._tags(g.get('fs_name') or "")), g) for g in cands),
+                        key=lambda x: -x[0])
+        if scored[0][0] > scored[1][0]:
+            return scored[0][1]
+        logger.info(f"'{save_name}' could be any of {len(cands)} ROMs ({', '.join(g.get('fs_name', '?') for g in cands[:4])}); "
+                    "link it by hand on the Saves page.")
+        return None
 
     @staticmethod
     def _norm(text: str) -> str:

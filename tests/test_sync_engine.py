@@ -462,3 +462,45 @@ def test_missing_romm_table_is_explained():
     e = RuntimeError("""RomM returned 500: {"detail":"(mariadb.ProgrammingError) Table 'romm.deleted_assets' doesn't exist"}""")
     msg = explain_error(e, a)
     assert "deleted_assets" in msg and "migration" in msg
+
+
+# --- matching by title / manual links ------------------------------------
+def test_title_key_handles_articles_tags_and_punctuation():
+    from src.library_classes import LibraryScanner as L
+    assert L.title_key("Legend of Zelda, The - Spirit Tracks (USA) (En,Fr,Es)") == \
+        L.title_key("The Legend of Zelda: Spirit Tracks")
+    assert L.title_key("Mario & Luigi (Europe)") == L.title_key("Mario and Luigi")
+    assert L.title_key("starfall_odyssey") == L.title_key("Starfall Odyssey (USA)")
+
+
+def test_title_match_prefers_matching_region_and_refuses_ties():
+    from src.library_classes import LibraryScanner as L
+    roms = [{"id": 1, "fs_name": "Spirit Tracks (USA).nds", "name": "Zelda"},
+            {"id": 2, "fs_name": "Spirit Tracks (Europe).nds", "name": "Zelda"}]
+    assert L.find_rom_by_title("Spirit-Tracks [USA]", roms)["id"] == 1
+    assert L.find_rom_by_title("Spirit Tracks!", roms) is None       # can't tell which: no guess
+
+
+def test_remote_files_follow_local_name_for_title_matched_games():
+    row = {"id": 5, "fs_name": "Legend of Zelda, The - Spirit Tracks (USA).nds",
+           "fs_name_no_ext": "Legend of Zelda, The - Spirit Tracks (USA)", "_local_stem": "Zelda Spirit Tracks"}
+    item = {"file_name": "Legend of Zelda, The - Spirit Tracks (USA) [2026-10-01_10-00-00].sav"}
+    assert local_name_for_remote(item, row) == "Zelda Spirit Tracks.sav"
+    assert local_name_for_remote({"file_name": "Zelda Spirit Tracks.sav"}, row) == "Zelda Spirit Tracks.sav"
+
+
+def test_manual_link_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    from src import links
+    from src.games_class import Game
+    from src.library_classes import LibraryScanner as L
+    links.set_link("nds", "My Zelda Save", 9)
+
+    class Srv:
+        library = [{"id": 9, "name": "Zelda", "platform_slug": "nds", "platform_id": 1, "fs_name": "Zelda (USA).nds",
+                    "fs_size_bytes": 1}]
+        def get_romm_platform(self, folder):
+            return "nds"
+    g = Game(name="My Zelda Save", path=tmp_path, platform="nds")
+    L.match_to_romm([g], Srv())
+    assert g.is_matched and g.romm_id == 9 and g.match_how == "link"

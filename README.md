@@ -349,17 +349,21 @@ See [docs/TWO_WAY_SYNC.md](docs/TWO_WAY_SYNC.md) for how the sync engine decides
 
 ### How saves are matched to games
 
-- **Files from RomM's own player and other devices** are renamed to what RetroArch expects when they're downloaded. RomM 5.x stores them under other names: `autosave [2026-08-17_19-02-17].srm`, `Game [date].autosave.state0`. These become `Game (USA).srm` and `Game (USA).state` (slot 0 is `.state` in RetroArch), matching the ROM's file name. If several RomM files map to the same name, the newest wins.
+- **Files from RomM's own player and other devices** are renamed to what RetroArch expects when they're downloaded. RomM 5.x stores them under other names: `autosave [2026-08-17_19-02-17].srm`, `Game [date].autosave.state0`. These become `Game (USA).srm` and `Game (USA).state` (slot 0 is `.state` in RetroArch), matching the ROM's file name (or your save's own name, if it was matched by title or linked by hand). RetroArch keeps one save file per game, so when several RomM versions map to the same name, the newest one is synced. That's how progress from the web player or another device reaches your handhelds. The older versions are still on RomM: see them under **Version history** on the Saves page, put one back, or have old ones cleared automatically with `ROMM_KEEP_VERSIONS`.
 
 - **One game per system folder.** A save belongs to the game in the same system folder: `gb/Tetris (World).srm` and `gbc/Tetris (World).srm` are two different games, each matched to its own RomM ROM. A save and a state of the same game in separate saves/states folders (`saves/gba/…`, `states/gba/…`) are still one game.
 - **Exact name first.** A save named after the ROM file (`Pokemon Red (USA, Europe).srm` ↔ `Pokemon Red (USA, Europe).gb`) is matched exactly. A shorter name only matches a ROM whose file name *starts* with it, and the closest one wins. Text in the middle of a name never matches, so "Mario" can't pick "Super Mario World".
+- **Same title, different spelling.** If neither of those matches, a save matches a ROM with the same title once punctuation, region/version tags and trailing articles are ignored: `zelda_spirit_tracks.sav`, `The Legend of Zelda: Spirit Tracks.sav` and `Legend of Zelda, The - Spirit Tracks (USA) (En,Fr,Es).nds` all count as the same title, and RomM's own game name counts too. If several ROMs share that title, the one with the same region tags wins; if that's still a tie, nothing is guessed.
+- **Link by hand.** For anything else (a renamed save, a hack, a save from another emulator), open the **Saves** page, filter by *Not matched* and click **Link to a RomM game…**. Pick the game; its saves and states then sync with it, and files from RomM are written under your save's name so your emulator finds them. Links are stored in `/data/game_links.json` and can be changed or removed the same way. A ROM can only be linked to one local game.
+
+  ![Linking an unmatched save to a RomM game](docs/screenshots/link.png)
 - **Dots in names** ("Dr. Mario (USA).srm", "Super Mario Bros. 3") are handled everywhere, including watch mode.
 - **Two folders, one platform.** If two of your folders point at the same RomM platform (e.g. `md` and `megadrive`) and both contain the same game, the first is synced and the other is listed under **Errors** with an explanation, instead of the two copies overwriting each other on RomM.
 
 # Known issues
 
-- Saves must be named after the ROM file (RetroArch's default). A save with a completely different name won't match.
-- RomM 5.x saves uploaded by other clients into *slots* get a version tag in their name (`Game [2026-10-01 …].srm`). The tag is stripped when writing to the sync folder, and the newest version wins.
+- ~~Saves must be named after the ROM file.~~ Saves with the same title in another spelling match automatically, and anything else can be linked by hand on the Saves page (2.11.0).
+- ~~RomM 5.x versions: the newest wins and older ones are hidden.~~ RetroArch uses one save per game, so the newest version is still the one synced, but every older version can be seen, downloaded and put back from Version history, and cleaned up with `ROMM_KEEP_VERSIONS` (2.10.0).
 - ~~Retroarch's state screenshots are not linked to the corresponding state file on the RomM server.~~ Fixed in RomM.
 - ~~Only HTTP Basic Authentication.~~ API tokens supported since 1.4.0.
 - ~~Syncthing only PUSHES to RomM.~~ RomM → folder sync added in 2.0.0.

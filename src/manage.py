@@ -55,7 +55,8 @@ def inventory() -> List[dict]:
     seen_roms = set()
     taken_remote = set()  # (api, id) already listed under a local game
 
-    def add_row(game_name, platform, rom_id, rom_row, ft, name, lf, rf, local_dest: Optional[Path]):
+    def add_row(game_name, platform, rom_id, rom_row, ft, name, lf, rf, local_dest: Optional[Path],
+                match_how: Optional[str] = None, local_game: bool = False):
         row_id = _rid(platform, ft, rom_id, name)
         rom_row = rom_row or {}
         key = file_key(ft, rom_id, name) if rom_id else None
@@ -71,6 +72,8 @@ def inventory() -> List[dict]:
             "id": row_id, "game": game_name, "platform": platform,
             "system": rom_row.get("platform_display_name") or platform,
             "rom_id": rom_id, "matched": bool(rom_id), "type": ft, "name": name, "status": status,
+            "match_how": match_how, "local_game": local_game,
+            "romm_name": rom_row.get("name"), "romm_file": rom_row.get("fs_name"),
             "local": None if lf is None else {"size": lf.size, "mtime": lf.mtime.isoformat(),
                                                "screenshot": str(lf.screenshot) if lf.screenshot else None},
             "romm": None if rf is None else {"id": rf.get("id"), "size": rf.get("file_size_bytes"),
@@ -102,7 +105,8 @@ def inventory() -> List[dict]:
                     taken_remote.add((rf.get("_api"), rf["id"]))
             root = eng.cfg.sync_dir_for(ft)
             dest = (root / g.platform / name) if root is not None else None
-            add_row(g.name, g.platform, g.romm_id if g.is_matched else None, g.romm_row, ft, name, lf, rf, dest)
+            add_row(g.name, g.platform, g.romm_id if g.is_matched else None, g.romm_row, ft, name, lf, rf, dest,
+                    getattr(g, "match_how", None) if g.is_matched else None, True)
 
     # RomM files for games that have nothing in the sync folders
     folders = {}
@@ -358,6 +362,68 @@ def auto_prune(srv, lcl, keep: int, rom_ids: Optional[set] = None) -> int:
         logger.info(f"Moved {removed} old RomM version(s) to the recycle bin (keeping the newest {keep} per file).")
         STATE.add_activity("INFO", f"{removed} old RomM version(s) moved to the recycle bin")
     return removed
+
+
+# region manual links
+def search_roms(folder: str, q: str, all_platforms: bool = False, limit: int = 40) -> List[dict]:
+    orch = STATE.orchestrator
+    if orch is None or orch.srv is None:
+        raise RuntimeError("The app is still starting.")
+    srv = orch.srv
+    slug = srv.get_romm_platform(folder)
+    words = q.casefold().split()
+    used = {g.romm_id: f"{g.name} ({g.platform})" for g in orch.lcl.games.values() if g.is_matched}
+    out = []
+    for r in srv.library:
+        if not all_platforms and slug and r.get("platform_slug") != slug:
+            continue
+        hay = f"{r.get('name', '')} {r.get('fs_name', '')}".casefold()
+        if all(w in hay for w in words):
+            out.append({"id": r["id"], "name": r.get("name"), "fs_name": r.get("fs_name"),
+                        "platform": r.get("platform_display_name") or r.get("platform_slug"),
+                        "used_by": used.get(r["id"])})
+            if len(out) >= limit:
+                break
+    return out
+
+
+def link_game(folder: str, game_name: str, rom_id: Optional[int]) -> str:
+    """Link a local game to a RomM ROM by hand (rom_id None = remove the link and match automatically)."""
+    from . import links
+    from .library_classes import LibraryScanner
+    orch = STATE.orchestrator
+    if orch is None or orch.lcl is None or orch.srv is None:
+        raise RuntimeError("The app is still starting.")
+    game = next((g for g in orch.lcl.games.values()
+                 if g.platform.lower() == folder.lower() and g.name == game_name), None)
+    if game is None:
+        raise ValueError("That game isn't in your sync folders any more.")
+    rows = {r["id"]: r for r in orch.srv.library}
+    if rom_id is not None and rom_id not in rows:
+        raise ValueError("That ROM isn't in your RomM library.")
+    other = next((g for g in orch.lcl.games.values() if g is not game and g.is_matched and g.romm_id == rom_id), None)
+    if rom_id is not None and other is not None:
+        raise ValueError(f"That ROM already syncs with '{other.name}' in the '{other.platform}' folder. Two local "
+                         "games can't share one RomM game, because their saves would overwrite each other.")
+    links.set_link(folder, game_name, rom_id)
+    with STATE.sync_lock:
+        if game.romm_row:
+            game.romm_row.pop("_local_stem", None)
+        game.is_matched, game.romm_id, game.romm_row, game.match_how = False, None, None, None
+        if rom_id is not None:
+            LibraryScanner._set_match(game, rows[rom_id], "link")
+        else:
+            taken = {g.romm_id for g in orch.lcl.games.values() if g.is_matched and g is not game}
+            LibraryScanner.match_to_romm([game], orch.srv, taken=taken)
+    if rom_id is not None:
+        msg = f"Linked '{game_name}' to {rows[rom_id].get('name')} ({rows[rom_id].get('fs_name')})"
+    else:
+        msg = f"Removed the link for '{game_name}'" + (f"; it now matches {game.romm_row.get('fs_name')}"
+                                                         if game.is_matched else "; it isn't matched to a RomM game")
+    STATE.add_activity("INFO", msg)
+    logger.info(msg)
+    return msg
+# endregion
 
 
 # region version history

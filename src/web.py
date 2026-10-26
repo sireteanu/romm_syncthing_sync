@@ -60,6 +60,12 @@ class FolderToggle(BaseModel):
     enabled: bool
 
 
+class LinkBody(BaseModel):
+    platform: str
+    game: str
+    rom_id: Optional[int] = None
+
+
 class MappingUpdate(BaseModel):
     choices: Dict[str, Optional[str]]  # folder -> RomM slug, or None to remove the mapping
 
@@ -385,6 +391,25 @@ def create_app(cfg) -> FastAPI:
         except Exception as e:
             raise HTTPException(502, f"Couldn't read the saves list: {e}")
         return {"rows": rows, "job": manage.job_status(), "dry_run": bool(cfg.DRY_RUN)}
+
+    @app.get("/api/romm/search")
+    def romm_search(folder: str, q: str = "", all: bool = False):
+        try:
+            return {"roms": manage.search_roms(folder, q, all)}
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+
+    @app.put("/api/links")
+    def links_set(body: LinkBody):
+        try:
+            msg = manage.link_game(body.platform, body.game, body.rom_id)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except RuntimeError as e:
+            raise HTTPException(503, str(e))
+        if STATE.request_sync_callback:
+            STATE.request_sync_callback()
+        return {"ok": True, "message": msg}
 
     @app.get("/api/saves/job")
     def saves_job():

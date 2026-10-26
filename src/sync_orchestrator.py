@@ -78,6 +78,8 @@ class SyncOrchestrator:
         logger.info(f"Sync folders scanned: {len(games):,} games, {n_saves:,} saves, {n_states:,} states "
                     f"in {n_systems} system folder(s) ({tpc() - t0:.1f}s).")
 
+        for r in srv.library:
+            r.pop("_local_stem", None)  # set again below for games matched by title / linked by hand
         LibraryScanner.match_to_romm(games, srv)
         matched = sum(1 for g in games if g.is_matched)
         logger.info(f"Matched {matched:,} of {len(games):,} games to RomM"

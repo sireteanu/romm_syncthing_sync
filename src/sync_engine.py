@@ -144,9 +144,11 @@ def local_name_for_remote(item: dict, rom_row: Optional[dict] = None) -> str:
         return name
     from .library_classes import LibraryScanner
     game_name, ftype = LibraryScanner.parse_save_filename(name)
-    if not game_name or not ftype or LibraryScanner.find_rom(game_name, [rom_row]) is not None:
+    local_stem = rom_row.get("_local_stem")  # matched by title or linked by hand: the local game's own name
+    if not game_name or not ftype or game_name == local_stem or \
+            (not local_stem and LibraryScanner.find_rom(game_name, [rom_row]) is not None):
         return name
-    rom_stem = rom_row.get("fs_name_no_ext") or os.path.splitext(rom_row.get("fs_name") or "")[0]
+    rom_stem = local_stem or rom_row.get("fs_name_no_ext") or os.path.splitext(rom_row.get("fs_name") or "")[0]
     if not rom_stem:
         return name
     suffix = name[len(game_name):]  # ".srm", ".state0", ".state.auto", ".autosave.state0" ...
