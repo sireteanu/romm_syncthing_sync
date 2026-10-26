@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.10.0 — version history, Syncthing, per-system switches
+
+### Added
+- **Version history** on the Saves page: click a file to see every copy (folder, each RomM version, backups, recycle bin), download any of them, or put one back into your sync folder.
+- **Download .zip** of selected saves/states from the Saves page, laid out like your sync folders.
+- **Keep the last N RomM versions** (`ROMM_KEEP_VERSIONS`, Settings → Files & backups): older copies RomM keeps of every upload are moved to the recycle bin after each sync. The copy your folder is synced with is always kept.
+- **Syncthing integration** (optional, Settings → Syncthing): waits for Syncthing to finish receiving files before syncing, and shows your devices and how up to date they are on the dashboard. Read-only.
+- **Per-system sync switch** on the Platforms page.
+- **Dry run** switch on the Settings page.
+- **Health check:** the container shows as unhealthy when syncs have been failing for 15 minutes (e.g. RomM unreachable).
+
+### Changed
+- When RomM has changes, only the games they belong to are synced, instead of re-reading all sync folders.
+
+### Fixed
+- A save updated by this app and then changed again by another device before the next RomM check could be missed until the daily folder scan.
+- Tests for the Saves page actions (delete, old-version removal, version history, zip).
+
 ## 2.9.0 — Saves page
 
 ### Added

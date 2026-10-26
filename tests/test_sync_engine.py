@@ -382,18 +382,23 @@ def test_file_mode_setting_accepts_numeric_choice():
 
 
 # --- quiet RomM polling (watch mode) ------------------------------------
-def test_quiet_poll_only_scans_when_romm_changed(monkeypatch):
+def _poller(monkeypatch):
     import threading as _t
     from src import sync_orchestrator as so
 
     class FakeApi:
         def __init__(self):
-            self.fp = {("saves", 1): "t1"}
-            self.own_changes = set()
+            self.fp = {("saves", 1): ("t1", 10)}
+            self.own_changes = {}
             self._own_lock = _t.Lock()
 
         def fingerprint(self):
             return dict(self.fp)
+
+        def take_own(self, snap):
+            for k, v in snap.items():
+                if self.own_changes.get(k, object()) == v:
+                    del self.own_changes[k]
 
     class FakeCfg:
         FULL_SCAN_INTERVAL_HOURS = 0
@@ -401,24 +406,50 @@ def test_quiet_poll_only_scans_when_romm_changed(monkeypatch):
             self.ROMM_CREDENTIALS = api
 
     class FakeOrch:
-        runs = 0
+        def __init__(self):
+            self.full, self.targeted = 0, []
         def full_sync(self, force_sync=False):
-            FakeOrch.runs += 1
+            self.full += 1
+        def romm_sync(self, rom_ids):
+            self.targeted.append(set(rom_ids))
 
-    api = FakeApi()
+    api, orch = FakeApi(), FakeOrch()
     monkeypatch.setattr(so, "get_config", lambda: FakeCfg(api))
-    p = so.RommPoller(FakeOrch(), 600)
-    p.check()                      # first check: no fingerprint yet -> full sync
-    assert FakeOrch.runs == 1
-    p.check()                      # nothing changed on RomM -> folders untouched
-    assert FakeOrch.runs == 1
-    api.fp[("saves", 2)] = "t2"    # our own upload
-    api.own_changes.add(("saves", 2))
+    return so.RommPoller(orch, 600), api, orch
+
+
+def test_quiet_poll_only_syncs_what_changed_on_romm(monkeypatch):
+    p, api, orch = _poller(monkeypatch)
+    p.check()                                   # first check: no fingerprint yet -> full sync
+    assert orch.full == 1
+    p.check()                                   # nothing changed on RomM -> folders untouched
+    assert orch.full == 1 and orch.targeted == []
+    api.fp[("saves", 2)] = ("t2", 10)           # our own upload
+    api.own_changes[("saves", 2)] = "t2"
     p.check()
-    assert FakeOrch.runs == 1 and not api.own_changes
-    api.fp[("states", 9)] = "t3"   # another device uploaded a state
+    assert orch.targeted == [] and not api.own_changes
+    api.fp[("states", 9)] = ("t3", 42)          # another device uploaded a state for ROM 42
     p.check()
-    assert FakeOrch.runs == 2
-    del api.fp[("saves", 1)]       # deleted on RomM
+    assert orch.targeted == [{42}]
+    del api.fp[("saves", 1)]                    # deleted on RomM (ROM 10)
     p.check()
-    assert FakeOrch.runs == 3
+    assert orch.targeted[-1] == {10}
+    assert orch.full == 1                       # never re-read everything
+
+
+def test_own_change_overwritten_by_another_device_still_counts(monkeypatch):
+    p, api, orch = _poller(monkeypatch)
+    p.check()
+    api.fp[("saves", 1)] = ("t5", 10)           # we updated save 1 (RomM says t5)...
+    api.own_changes[("saves", 1)] = "t4"        # ...but our upload got t4: someone changed it after us
+    p.check()
+    assert orch.targeted == [{10}]
+
+
+def test_own_delete_is_ignored(monkeypatch):
+    p, api, orch = _poller(monkeypatch)
+    p.check()
+    del api.fp[("saves", 1)]
+    api.own_changes[("saves", 1)] = None
+    p.check()
+    assert orch.targeted == [] and orch.full == 1

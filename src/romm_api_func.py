@@ -235,9 +235,10 @@ class RommUser:
         self.api_token = romm_api_token
         self._saves = None
         self._states = None
-        # (kind, id) of saves/states this app created, replaced or deleted itself. The quiet RomM check uses it
-        # so our own uploads don't look like "something changed on RomM" and trigger a folder scan.
-        self.own_changes: set = set()
+        # {(kind, id): updated_at} of saves/states this app created or replaced itself (None = deleted). The quiet
+        # RomM check uses it so our own uploads don't look like "something changed on RomM". The timestamp makes
+        # sure a later change by another device to the same file still counts.
+        self.own_changes: dict = {}
         self._own_lock = threading.Lock()
 
     def _auth_kwargs(self) -> dict:
@@ -297,7 +298,8 @@ class RommUser:
             if response.status_code >= 400:
                 raise RuntimeError(f"RomM returned {response.status_code}: {response.text[:300]}")
             data = response.json()
-            self.mark_own(kind, [romm_id, (data or {}).get("id") if isinstance(data, dict) else None])
+            if isinstance(data, dict):
+                self.mark_own(kind, {romm_id, data.get("id")} - {None}, data.get("updated_at") or "")
             return data
         finally:
             for h in handles:
@@ -312,18 +314,27 @@ class RommUser:
         logger.debug(f"POST {url} {ids} - {response.status_code}")
         if response.status_code >= 400:
             raise RuntimeError(f"RomM returned {response.status_code}: {response.text[:300]}")
-        self.mark_own(kind, ids)
+        self.mark_own(kind, ids, None)
 
-    def mark_own(self, kind: str, ids) -> None:
+    def mark_own(self, kind: str, ids, updated_at) -> None:
         with self._own_lock:
-            self.own_changes.update((kind, i) for i in ids if i is not None)
+            for i in ids:
+                if i is not None:
+                    self.own_changes[(kind, i)] = updated_at
 
-    def fingerprint(self) -> Dict[tuple, str]:
-        """{(kind, id): updated_at} for every save and state. Two network requests, no disk access."""
+    def take_own(self, snapshot: dict) -> None:
+        """Forget own changes that are covered by a fingerprint taken after `snapshot` was copied."""
+        with self._own_lock:
+            for k, v in snapshot.items():
+                if self.own_changes.get(k, object()) == v:
+                    del self.own_changes[k]
+
+    def fingerprint(self) -> Dict[tuple, tuple]:
+        """{(kind, id): (updated_at, rom_id)} for every save and state. Two network requests, no disk access."""
         out = {}
         for kind in ("saves", "states"):
             for it in self.list_all(kind):
-                out[(kind, it.get("id"))] = str(it.get("updated_at"))
+                out[(kind, it.get("id"))] = (str(it.get("updated_at")), it.get("rom_id"))
         return out
 
     def absolute(self, path: str) -> str:

@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -44,6 +44,20 @@ class BulkDecision(BaseModel):
 class SavesAction(BaseModel):
     action: str
     ids: List[str]
+
+
+class VersionRef(BaseModel):
+    source: str
+    ref: str = ""
+
+
+class IdList(BaseModel):
+    ids: List[str]
+
+
+class FolderToggle(BaseModel):
+    folder: str
+    enabled: bool
 
 
 class MappingUpdate(BaseModel):
@@ -110,7 +124,15 @@ def create_app(cfg) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "phase": STATE.phase}
+        """Docker HEALTHCHECK: unhealthy once syncs have been failing (e.g. RomM unreachable) for 15 minutes."""
+        from datetime import datetime, timezone
+        since = STATE.problem_since
+        bad = False
+        if since:
+            bad = (datetime.now(timezone.utc) - datetime.fromisoformat(since)).total_seconds() > 900
+        body = {"ok": not bad, "phase": STATE.phase, "problem": STATE.last_error if since else None,
+                "problem_since": since}
+        return JSONResponse(body, status_code=503 if bad else 200)
 
     @app.get("/api/status")
     def status():
@@ -240,6 +262,8 @@ def create_app(cfg) -> FastAPI:
         with STATE.lock:
             games = list(STATE.games.values())
         folders = []
+        from .settings import disabled_folders
+        disabled = disabled_folders()
         for folder in pf.local_platform_folders(_sync_dirs()):
             slug, how = pf.resolve(folder, mapping, lib_slugs, lib_fs, catalog.get("aliases", {}))
             fg = [g for g in games if g["platform"].lower() == folder.lower()]
@@ -250,6 +274,7 @@ def create_app(cfg) -> FastAPI:
                 "rom_count": lib_by_slug.get(slug, {}).get("rom_count") if slug else None,
                 "known_slug": bool(slug) and (slug in names),
                 "games": len(fg), "unmatched": sum(1 for g in fg if not g.get("matched")),
+                "enabled": folder.lower() not in disabled,
             })
         platforms = [{"slug": slug, "name": name, "in_library": slug in lib_slugs,
                       "rom_count": lib_by_slug.get(slug, {}).get("rom_count", 0)}
@@ -302,6 +327,34 @@ def create_app(cfg) -> FastAPI:
         return _platforms_payload()
     # endregion
 
+    @app.put("/api/platforms/enabled")
+    def platforms_enabled(body: FolderToggle):
+        from . import settings as st
+        if body.folder.lower() not in {f.lower() for f in pf.local_platform_folders(_sync_dirs())}:
+            raise HTTPException(400, f"Unknown folder: {body.folder}")
+        st.set_folder_enabled(body.folder, body.enabled)
+        st.invalidate_cache()
+        STATE.add_activity("INFO", f"Sync {'switched on' if body.enabled else 'switched off'} for '{body.folder}'")
+        if body.enabled and STATE.request_sync_callback:
+            STATE.request_sync_callback()
+        return _platforms_payload()
+
+    # region syncthing
+    @app.get("/api/syncthing")
+    def syncthing_overview():
+        from . import syncthing
+        return syncthing.overview()
+
+    @app.get("/api/syncthing/folders")
+    def syncthing_folders():
+        from . import syncthing
+        if not syncthing.configured():
+            raise HTTPException(400, "Save the Syncthing address and API key first.")
+        try:
+            return {"folders": syncthing.folders(), "picked": syncthing.folder_ids()}
+        except Exception as e:
+            raise HTTPException(502, f"Couldn't reach Syncthing: {e}")
+
     # region logs
     from .sync_state import read_log, log_file
 
@@ -345,6 +398,44 @@ def create_app(cfg) -> FastAPI:
             raise HTTPException(400, str(e))
         except RuntimeError as e:
             raise HTTPException(409, str(e))
+
+    @app.get("/api/saves/{row_id}/versions")
+    def saves_versions(row_id: str):
+        try:
+            return {"versions": manage.versions(row_id)}
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/saves/{row_id}/versions/download")
+    def saves_version_download(row_id: str, source: str, ref: str = ""):
+        try:
+            data = manage.version_content(row_id, source, ref)
+            name = manage._row(row_id)["name"]
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+        from urllib.parse import quote
+        return Response(data, media_type="application/octet-stream",
+                        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
+
+    @app.post("/api/saves/{row_id}/versions/restore")
+    def saves_version_restore(row_id: str, body: VersionRef):
+        try:
+            msg = manage.restore_version(row_id, body.source, body.ref)
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+        return {"ok": True, "message": msg}
+
+    @app.post("/api/saves/zip")
+    def saves_zip(body: IdList):
+        try:
+            f, n, problems = manage.build_zip(body.ids)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        from datetime import datetime as _dt
+        name = f"romm-sync-saves-{_dt.now().strftime('%Y-%m-%d')}.zip"
+        return StreamingResponse(iter(lambda: f.read(1 << 20), b""), media_type="application/zip",
+                                 headers={"Content-Disposition": f'attachment; filename="{name}"',
+                                          "X-Files": str(n), "X-Problems": str(len(problems))})
 
     # region recycle bin
     from . import recycle as rb

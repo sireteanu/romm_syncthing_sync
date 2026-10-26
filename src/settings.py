@@ -41,7 +41,9 @@ FIELDS: Dict[str, dict] = {
                                          "the disks the folders live on. 0 = only at startup and when you press Sync now."},
     "WATCHDOG_DELAY_SECONDS": {"type": "int", "min": 0, "max": 3600, "unit": "seconds", "group": "timing",
                                "label": "Wait after a file changes",
-                               "help": "Watch mode: quiet time after Syncthing writes a file before syncing it."},
+                               "help": "Watch mode: quiet time after Syncthing writes a file before syncing it. With the "
+                                       "Syncthing integration on, the app also waits until Syncthing reports it's done, "
+                                       "so this can be short (e.g. 5 s)."},
     "SYNC_INTERVAL_SECONDS": {"type": "int", "min": 60, "max": 604800, "unit": "seconds", "group": "timing",
                               "label": "Full sync every", "help": "Periodic mode only."},
     "BACKUP_RETENTION_DAYS": {"type": "int", "min": 0, "max": 3650, "unit": "days", "group": "backups",
@@ -50,11 +52,25 @@ FIELDS: Dict[str, dict] = {
     "RECYCLE_RETENTION_DAYS": {"type": "int", "min": 0, "max": 3650, "unit": "days", "group": "backups",
                                "label": "Empty the recycle bin after",
                                "help": "Deleted files are kept this long, then removed for good. 0 = keep forever."},
+    "ROMM_KEEP_VERSIONS": {"type": "int", "min": 0, "max": 1000, "unit": "versions", "group": "backups",
+                           "label": "Versions to keep on RomM for each file",
+                           "help": "RomM keeps a copy every time a file is uploaded. After each sync, older copies beyond "
+                                   "this number are moved to the recycle bin (the copy your folder is synced with is "
+                                   "always kept). 0 = keep them all."},
     "FILE_MODE": {"type": "choice", "choices": [0o777, 0o666, 0o775, 0o664], "group": "backups",
                   "labels": {"511": "0777", "438": "0666", "509": "0775", "436": "0664"},
                   "label": "Permissions for files written to your sync folders",
                   "help": "0777 (default) = everyone can read and write, the usual choice on Unraid shares. "
                           "0666 = the same without the executable bit."},
+    "DRY_RUN": {"type": "bool", "group": "sync", "label": "Dry run (test mode)",
+                "help": "On: nothing is uploaded, downloaded or deleted. Each sync only logs what it would do "
+                        "(Logs → Recent actions). Use it to check a new setting or platform mapping."},
+    "SYNCTHING_URL": {"type": "str", "group": "syncthing", "label": "Syncthing address",
+                      "help": "e.g. http://192.168.1.6:8384. Leave empty to turn the Syncthing integration off."},
+    "SYNCTHING_API_KEY": {"type": "secret", "group": "syncthing", "label": "Syncthing API key",
+                          "help": "Syncthing → Actions → Settings → General → API Key."},
+    "SYNCTHING_FOLDERS": {"type": "str", "group": "syncthing", "label": "Syncthing folders with your saves",
+                          "help": "Folder IDs, comma separated. Pick them below once the address and key are saved."},
     "WEB_USERNAME": {"type": "str", "group": "access", "label": "Dashboard username",
                      "help": "Set both username and password to require a login. Clear both to turn it off."},
     "WEB_PASSWORD": {"type": "secret", "group": "access", "label": "Dashboard password", "help": ""},
@@ -134,6 +150,14 @@ def validate(key: str, value: Any):
         if value not in spec["choices"]:
             raise ValueError(f"{spec['label']}: must be one of {', '.join(map(str, spec['choices']))}")
         return value
+    if spec["type"] == "bool":
+        if isinstance(value, bool):
+            return value
+        if str(value).lower() in ("true", "1", "on", "yes"):
+            return True
+        if str(value).lower() in ("false", "0", "off", "no", ""):
+            return False
+        raise ValueError(f"{spec['label']}: must be on or off")
     if spec["type"] == "int":
         try:
             v = int(value)
@@ -182,6 +206,40 @@ def describe(cfg) -> dict:
             item["value"] = current
         out.append(item)
     return {"fields": out}
+
+
+# region per-system sync switch
+def disabled_folders() -> set:
+    return {f.lower() for f in load().get("disabled_folders", [])}
+
+
+def set_folder_enabled(folder: str, enabled: bool) -> None:
+    data = load()
+    cur = [f for f in data.get("disabled_folders", []) if f.lower() != folder.lower()]
+    if not enabled:
+        cur.append(folder)
+    data["disabled_folders"] = sorted(cur, key=str.lower)
+    save(data)
+
+
+_disabled_cache = {"at": 0.0, "v": set()}
+
+
+def sync_enabled(folder: str) -> bool:
+    """False for system folders switched off on the Platforms page."""
+    import time
+    if time.monotonic() - _disabled_cache["at"] > 5:
+        try:
+            _disabled_cache["v"] = disabled_folders()
+        except Exception:  # noqa: BLE001
+            pass
+        _disabled_cache["at"] = time.monotonic()
+    return (folder or "").lower() not in _disabled_cache["v"]
+
+
+def invalidate_cache():
+    _disabled_cache["at"] = 0.0
+# endregion
 
 
 # region notifications

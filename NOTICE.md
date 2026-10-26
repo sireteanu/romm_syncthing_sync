@@ -22,7 +22,8 @@ Modifications by [sireteanu](https://github.com/sireteanu), also under the MIT L
 | Settings page, notifications (Discord, ntfy, Gotify, Pushbullet, webhook) | `src/settings.py`, `src/notify.py` |
 | Version display and update check | `src/version.py` |
 | Deletion sync and recycle bin | `src/recycle.py`, `src/sync_engine.py` |
-| Saves page (inventory and bulk actions) | `src/manage.py` |
+| Saves page (inventory, bulk actions, version history, zip export, automatic version pruning) | `src/manage.py` |
+| Syncthing integration | `src/syncthing.py` |
 | Tests, mock RomM server and demo data | `tests/` |
 
 Lines changed in files that came from the original project are listed in the git history

@@ -282,24 +282,233 @@ def _prune(eng, r: dict):
     if eng.cfg.DRY_RUN:
         return True, f"[dry run] would remove {len(old)} older version(s) of {r['name']}"
     items = r.get("_items") or {}
-    by_api: Dict[str, list] = {}
-    for api, i in old:
-        item = items.get((api, i)) or {"id": i}
-        content = eng.romm.download_asset(api, item)
-        when = item.get("updated_at", "")[:16].replace("T", " ")
-        recycle.add(file_name=r["name"], file_type=r["type"], game=r["game"], platform=r["platform"],
-                    rom_id=r["rom_id"], deleted_from="romm", reason="Older RomM version", content=content,
-                    screenshot=_shot_bytes(eng, item), file_mode=eng.cfg.FILE_MODE,
-                    restore_path=str(r["_dest"] or Path(r["platform"]) / r["name"]),
-                    note=f"Older RomM version{(' from ' + when) if when else ''} (Saves page)")
-        by_api.setdefault(api, []).append(i)
-    for api, ids in by_api.items():
-        eng.romm.delete_assets(api, ids)
+    _bin_versions(eng, [(api, items.get((api, i)) or {"id": i}) for api, i in old], r["name"], r["type"], r["game"],
+                  r["platform"], r["rom_id"], str(r["_dest"] or _fallback_dest(eng, r["type"], r["platform"], r["name"])),
+                  "Saves page")
     a = _action(r, "manage_prune")
     msg = f"Removed {len(old)} older RomM version(s) of {r['name']} (kept the newest)"
     logger.info(f"✔ {msg}")
     STATE.finish_action(a, "done", msg)
     return True, msg
+
+
+def _fallback_dest(eng, ft: str, platform: str, name: str) -> Path:
+    root = eng.cfg.sync_dir_for(ft)
+    return (root / platform / name) if root is not None else Path(platform) / name
+
+
+def _bin_versions(eng, olds, name, ft, game, platform, rom_id, restore_path: str, source: str):
+    """Copy each (api, item) into the recycle bin, then delete them on RomM."""
+    from . import recycle
+    by_api: Dict[str, list] = {}
+    for api, item in olds:
+        content = eng.romm.download_asset(api, item)
+        when = (item.get("updated_at") or "")[:16].replace("T", " ")
+        recycle.add(file_name=name, file_type=ft, game=game, platform=platform, rom_id=rom_id, deleted_from="romm",
+                    reason="Older RomM version", content=content, screenshot=_shot_bytes(eng, item),
+                    file_mode=eng.cfg.FILE_MODE, restore_path=restore_path,
+                    note=f"Older RomM version{(' from ' + when) if when else ''} ({source})")
+        by_api.setdefault(api, []).append(item["id"])
+    for api, ids in by_api.items():
+        eng.romm.delete_assets(api, ids)
+
+
+def auto_prune(srv, lcl, keep: int, rom_ids: Optional[set] = None) -> int:
+    """Keep the newest `keep` RomM versions of every file (plus the one the sync is paired with); move older ones
+    to the recycle bin. Uses RomM's lists only; doesn't read the sync folders."""
+    from .sync_engine import SyncEngine, file_key, local_name_for_remote
+    if not keep or keep < 1 or srv is None:
+        return 0
+    eng = SyncEngine()
+    if eng.cfg.DRY_RUN:
+        return 0
+    remote = eng.fetch_remote()
+    rows = {r["id"]: r for r in srv.library}
+    local_platform = {g.romm_id: g.platform for g in (lcl.games.values() if lcl else []) if g.is_matched}
+    removed = 0
+    for ft_list in ("save", "state"):
+        for rom_id, items in remote[ft_list].items():
+            if rom_id not in rows or (rom_ids is not None and rom_id not in rom_ids):
+                continue
+            row = rows[rom_id]
+            groups: Dict[str, list] = {}
+            for it in items:
+                groups.setdefault(local_name_for_remote(it, row), []).append(it)
+            for name, its in groups.items():
+                if len(its) <= keep:
+                    continue
+                from .library_classes import LibraryScanner
+                ft = "state" if LibraryScanner.parse_save_filename(name)[1] in ("state", "state_screen") else "save"
+                its.sort(key=lambda it: _dt(it.get("updated_at")), reverse=True)
+                paired = (STATE.get_baseline(file_key(ft, rom_id, name)) or {}).get("romm_id")
+                olds = [it for it in its[keep:] if it["id"] != paired]
+                if not olds:
+                    continue
+                platform = local_platform.get(rom_id) or row.get("platform_slug")
+                game = row.get("fs_name_no_ext") or row.get("name") or str(rom_id)
+                try:
+                    _bin_versions(eng, [(it["_api"], it) for it in olds], name, ft, game, platform, rom_id,
+                                  str(_fallback_dest(eng, ft, platform, name)), f"kept the newest {keep}")
+                    removed += len(olds)
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"Couldn't remove old RomM versions of {name}: {e}")
+    if removed:
+        logger.info(f"Moved {removed} old RomM version(s) to the recycle bin (keeping the newest {keep} per file).")
+        STATE.add_activity("INFO", f"{removed} old RomM version(s) moved to the recycle bin")
+    return removed
+
+
+# region version history
+def _row(row_id: str) -> dict:
+    with _lock:
+        r = _rows.get(row_id)
+    if r is None:
+        raise ValueError("This file isn't in the list any more; reload the Saves page.")
+    return r
+
+
+def versions(row_id: str) -> List[dict]:
+    """Every copy of a file the app knows about: the folder copy, each RomM version, backups and recycle bin."""
+    from . import recycle
+    from .sync_state import data_dir
+    r = _row(row_id)
+    out = []
+    lf = r["_lf"]
+    if lf is not None and Path(lf.path).exists():
+        st = Path(lf.path).stat()
+        out.append({"source": "local", "ref": "", "when": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(),
+                    "size": st.st_size, "label": "In your sync folder", "current": True})
+    rf = r["_rf"]
+    items = r.get("_items") or {}
+    paired = (STATE.get_baseline(r["_key"]) or {}).get("romm_id") if r["_key"] else None
+    for api, i in (r["_group"] or ([(rf.get("_api"), rf["id"])] if rf else [])):
+        it = items.get((api, i)) or {}
+        latest = rf is not None and i == rf["id"]
+        out.append({"source": "romm", "ref": f"{api}:{i}", "when": it.get("updated_at"), "size": it.get("file_size_bytes"),
+                    "label": "On RomM" + (" (newest)" if latest else ""),
+                    "current": latest and lf is None, "paired": i == paired})
+    bdir = data_dir() / "backups"
+    if bdir.exists():
+        for day in bdir.iterdir():
+            folder = day / r["platform"]
+            if not folder.is_dir():
+                continue
+            for f in folder.iterdir():
+                parts = f.name.split("-", 2)
+                if len(parts) == 3 and parts[2] == r["name"] and parts[1] in ("local", "romm"):
+                    try:
+                        when = datetime.strptime(day.name + parts[0], "%Y-%m-%d%H%M%S").astimezone(timezone.utc).isoformat()
+                    except ValueError:
+                        when = None
+                    out.append({"source": "backup", "ref": str(f.relative_to(bdir)), "when": when,
+                                "size": f.stat().st_size,
+                                "label": f"Backup of the {'folder' if parts[1] == 'local' else 'RomM'} copy before it was overwritten"})
+    for e in recycle.entries():
+        if e["file_name"] == r["name"] and (e["platform"] or "").lower() == r["platform"].lower():
+            out.append({"source": "bin", "ref": e["id"], "when": e["deleted_at"], "size": e["size"],
+                        "label": "Recycle bin: " + (e.get("note") or e.get("reason") or "deleted")})
+    out.sort(key=lambda v: _dt(v.get("when")), reverse=True)
+    return out
+
+
+def version_content(row_id: str, source: str, ref: str) -> bytes:
+    from . import recycle
+    from .sync_engine import SyncEngine
+    from .sync_state import data_dir
+    r = _row(row_id)
+    if source == "local":
+        if r["_lf"] is None:
+            raise ValueError("There's no copy in your sync folder.")
+        return Path(r["_lf"].path).read_bytes()
+    if source == "romm":
+        api, _, i = ref.partition(":")
+        if (api, int(i)) not in {tuple(x) for x in r["_group"]} | ({(r["_rf"].get("_api"), r["_rf"]["id"])} if r["_rf"] else set()):
+            raise ValueError("That RomM version doesn't belong to this file.")
+        item = (r.get("_items") or {}).get((api, int(i))) or {"id": int(i)}
+        return SyncEngine().romm.download_asset(api, item)
+    if source == "backup":
+        base = (data_dir() / "backups").resolve()
+        p = (base / ref).resolve()
+        if base not in p.parents or not p.is_file():
+            raise ValueError("Backup not found.")
+        return p.read_bytes()
+    if source == "bin":
+        e = recycle.get(ref)
+        if e is None:
+            raise ValueError("That item is no longer in the recycle bin.")
+        return recycle.path_of(e).read_bytes()
+    raise ValueError("Unknown version source.")
+
+
+def restore_version(row_id: str, source: str, ref: str) -> str:
+    """Put an older copy into the sync folder. The current folder copy is backed up first; the next sync uploads
+    the restored copy to RomM (it's the newest change)."""
+    from .sync_engine import SyncEngine
+    r = _row(row_id)
+    if source == "local":
+        raise ValueError("That's already the copy in your folder.")
+    eng = SyncEngine()
+    lf = r["_lf"]
+    dest = Path(lf.path) if lf is not None else r["_dest"]
+    if dest is None:
+        raise ValueError("There's no sync folder for this system, so it can't be put back.")
+    content = version_content(row_id, source, ref)
+    if eng.cfg.DRY_RUN:
+        return f"[dry run] would put this version of {r['name']} back into your sync folder"
+    with STATE.sync_lock:
+        if dest.exists():
+            eng._backup_local(dest, r["platform"])
+        eng._write_local(dest, content, datetime.now(timezone.utc))
+    msg = f"Put an older version of {r['name']} back into your sync folder; it will be uploaded to RomM on the next sync"
+    a = _action(r, "manage_restore")
+    STATE.finish_action(a, "done", msg)
+    logger.info(f"✔ {msg}")
+    return msg
+# endregion
+
+
+# region zip export
+def build_zip(ids: List[str]):
+    """A zip of the selected files laid out like the sync folders (<system>/<file>). Folder copy if there is
+    one, otherwise RomM's newest version. Returns (temp file, number of files, problems)."""
+    import tempfile
+    import zipfile
+    from .sync_engine import SyncEngine, KIND_API
+    eng = SyncEngine()
+    with _lock:
+        rows = [_rows[i] for i in ids if i in _rows]
+    if not rows:
+        raise ValueError("Nothing selected (the list may be out of date; reload it).")
+    tmp = tempfile.SpooledTemporaryFile(max_size=64 * 1024 * 1024)
+    n, problems, used = 0, [], set()
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for r in rows:
+            sub_dir = "saves" if r["type"] == "save" else "states"
+            arc = f"{sub_dir}/{r['platform']}/{r['name']}"
+            k = 2
+            while arc in used:
+                arc = f"{sub_dir}/{r['platform']}/{Path(r['name']).stem} ({k}){Path(r['name']).suffix}"
+                k += 1
+            used.add(arc)
+            try:
+                lf = r["_lf"]
+                if lf is not None and Path(lf.path).exists():
+                    z.write(lf.path, arc)
+                    png = Path(lf.path).with_name(Path(lf.path).name + ".png")
+                    if png.exists():
+                        z.write(png, arc + ".png")
+                elif r["_rf"] is not None:
+                    z.writestr(arc, eng.romm.download_asset(r["_rf"].get("_api") or KIND_API[r["type"]], r["_rf"]))
+                else:
+                    continue
+                n += 1
+            except Exception as e:  # noqa: BLE001
+                problems.append(f"{r['name']}: {e}")
+        if problems:
+            z.writestr("PROBLEMS.txt", "These files couldn't be added:\n" + "\n".join(problems))
+    tmp.seek(0)
+    return tmp, n, problems
+# endregion
 
 
 def _download(eng, r: dict):

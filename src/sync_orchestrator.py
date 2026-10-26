@@ -16,6 +16,7 @@ from .library_classes import LocalLibrary, RetroGameServer, LibraryScanner
 from .config import get_config, METADATA_FILE_FILTERS
 from .sync_engine import SyncEngine, cleanup_backups
 from .sync_state import STATE, utcnow_iso
+from .settings import sync_enabled
 from watchdog.events import FileSystemEventHandler
 
 
@@ -158,13 +159,18 @@ class SyncOrchestrator:
                 if not reuse_libraries:
                     self.srv, self.lcl = self.build_libraries(self.app_cfg)
 
-                games = list(self.lcl.games.values())
+                all_games = list(self.lcl.games.values())
+                games = [g for g in all_games if sync_enabled(g.platform)]
+                off = len(all_games) - len(games)
+                if off:
+                    logger.info(f"Skipping {off} game(s) in system folders switched off on the Platforms page.")
                 matched_games, unmatched_games = self._validate_games(games)
                 result.unmatched_games = unmatched_games
                 # games that disappeared from the folder disappear from the GUI too
                 STATE.replace_games([])
 
-                summary = SyncEngine().reconcile(games, srv=self.srv, discover_remote=True, force=force_sync)
+                summary = SyncEngine().reconcile(games, srv=self.srv, discover_remote=True, force=force_sync,
+                                                 all_games=all_games)
                 result.games_synced = matched_games
                 result.success = summary["errors"] == 0
                 result.stats = summary
@@ -179,6 +185,7 @@ class SyncOrchestrator:
                 cleanup_backups()
                 from . import recycle
                 recycle.purge(int(self.app_cfg.RECYCLE_RETENTION_DAYS))
+                self._auto_prune()
                 return result
 
             except Exception as e:
@@ -217,7 +224,16 @@ class SyncOrchestrator:
                     logger.debug(f"[WATCHDOGSYNC] --- File: {p}, Type: {t}")
 
                 logger.info(f"[WATCHDOGSYNC] Processing {len(event_paths)} file change events...")
-                games_to_sync = self.lcl.update_from_watchdog_events(event_paths, self.srv)
+                changed = self.lcl.update_from_watchdog_events(event_paths, self.srv)
+                games_to_sync = [g for g in changed if sync_enabled(g.platform)]
+                off = {g.platform for g in changed if not sync_enabled(g.platform)}
+                if off:
+                    logger.info(f"[WATCHDOGSYNC] Ignoring changes in {', '.join(sorted(off))}: "
+                                "sync is switched off for that system (Platforms page).")
+                    if not games_to_sync:
+                        result.success = True
+                        STATE.sync_finished({})
+                        return result
 
                 if not games_to_sync:
                     logger.info("[WATCHDOGSYNC] No games in ROMM library found matching local library. Will not sync.")
@@ -244,6 +260,40 @@ class SyncOrchestrator:
                 return result
 
 
+def _romm_sync(self, rom_ids: set):
+    """Sync only the games whose RomM saves/states changed. Reads just those games' files."""
+    with STATE.sync_lock:
+        logger.info(f"---------- Starting RomM-change sync ({len(rom_ids)} game(s)) ----------")
+        STATE.sync_started()
+        try:
+            STATE.set_phase("building", "Refreshing RomM library")
+            self.srv = RetroGameServer.build_romm_library(self.app_cfg.ROMM_CREDENTIALS, sync_dirs=self.lcl.sync_folders)
+            all_games = list(self.lcl.games.values())
+            games = [g for g in all_games if g.is_matched and g.romm_id in rom_ids and sync_enabled(g.platform)]
+            summary = SyncEngine().reconcile(games, srv=self.srv, discover_remote=True, scope=rom_ids,
+                                             force=self.app_cfg.FORCE_PUSH_SYNC, all_games=all_games)
+            logger.info(f"[ROMMSYNC] {self._fmt(summary)}")
+            STATE.sync_finished(summary)
+            self._auto_prune(rom_ids)
+        except Exception as e:
+            logger.error(f"[ROMMSYNC] Failed! {e}")
+            STATE.sync_finished(error=f"Sync failed: {e}")
+
+
+def _auto_prune_impl(self, rom_ids: Optional[set] = None):
+    keep = int(getattr(self.app_cfg, "ROMM_KEEP_VERSIONS", 0) or 0)
+    if keep > 0:
+        try:
+            from . import manage
+            manage.auto_prune(self.srv, self.lcl, keep, rom_ids)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"Removing old RomM versions failed: {e}")
+
+
+SyncOrchestrator.romm_sync = _romm_sync
+SyncOrchestrator._auto_prune = _auto_prune_impl
+
+
 class WatchdogSyncManager:
     """Manages watchdog sync state and coordinates filesystem events with ROMM sync operations."""
 
@@ -257,6 +307,7 @@ class WatchdogSyncManager:
         self.timer_thread = None
         self.timer_lock = threading.Lock()
         self.is_syncing = False  # Track if sync is currently in progress
+        self._st_waited = 0      # seconds spent waiting for Syncthing to finish (see execute_sync)
 
     def schedule_sync(self):
         """Schedule sync to run after watchdog_delay_seconds of file system inactivity.
@@ -286,6 +337,21 @@ class WatchdogSyncManager:
 
     def execute_sync(self):
         """Execute the sync operation for pending events."""
+        from . import syncthing
+        reason = syncthing.busy()
+        if reason and self._st_waited < 600:
+            # Don't upload a save Syncthing is still receiving; look again shortly (at most 10 minutes).
+            if self._st_waited == 0:
+                logger.info(f"{reason}; waiting for it to finish before syncing.")
+            self._st_waited += 10
+            with self.timer_lock:
+                self.timer_thread = threading.Timer(10, self.execute_sync)
+                self.timer_thread.daemon = False
+                self.timer_thread.start()
+            return
+        if reason:
+            logger.warning(f"{reason} after 10 minutes; syncing anyway.")
+        self._st_waited = 0
         try:
             t0 = tpc()
             with self.timer_lock:
@@ -390,9 +456,9 @@ class RommPoller:
         if STATE.last_folder_scan:  # the startup sync just read everything: remember what RomM looked like
             try:
                 api = get_config().ROMM_CREDENTIALS
+                before = dict(api.own_changes)
                 self._last_fp = api.fingerprint()
-                with api._own_lock:
-                    api.own_changes.clear()
+                api.take_own(before)
             except Exception as e:
                 logger.debug(f"Couldn't read RomM's file list yet ({e}); the first check will do a full sync.")
         self.thread.start()
@@ -427,7 +493,7 @@ class RommPoller:
 
     def _full(self):
         api = get_config().ROMM_CREDENTIALS
-        before = set(api.own_changes)
+        before = dict(api.own_changes)
         try:
             fp = api.fingerprint()
         except Exception:
@@ -436,14 +502,23 @@ class RommPoller:
         STATE.last_romm_check = utcnow_iso()
         if fp is not None:
             self._last_fp = fp
-            with api._own_lock:
-                api.own_changes -= before
+            api.take_own(before)
 
-    def romm_changes(self, fp: dict, own: set) -> list:
-        """RomM files added, changed or removed since the last check, ignoring the ones this app changed."""
+    @staticmethod
+    def _is_own(k, fp: dict, own: dict) -> bool:
+        if k not in own:
+            return False
+        if k not in fp:
+            return own[k] is None                  # we deleted it
+        return own[k] == "" or (own[k] is not None and str(own[k]) == fp[k][0])  # still the version we wrote
+
+    def romm_changes(self, fp: dict, own: dict) -> dict:
+        """{(kind, id): rom_id} of RomM files added, changed or removed since the last check, ignoring the ones
+        this app changed itself (as long as nobody changed them again afterwards)."""
         last = self._last_fp or {}
-        changed = [k for k, v in fp.items() if last.get(k) != v] + [k for k in last if k not in fp]
-        return [k for k in changed if k not in own]
+        changed = {k: v[1] for k, v in fp.items() if last.get(k) != v}
+        changed.update({k: v[1] for k, v in last.items() if k not in fp})
+        return {k: r for k, r in changed.items() if not self._is_own(k, fp, own)}
 
     def check(self):
         cfg = get_config()
@@ -457,18 +532,22 @@ class RommPoller:
                 logger.info(f"Scheduled folder re-scan (every {hours} h).")
                 return self._full()
         api = cfg.ROMM_CREDENTIALS
-        before = set(api.own_changes)
+        before = dict(api.own_changes)
         fp = api.fingerprint()
         STATE.last_romm_check = utcnow_iso()
         changes = self.romm_changes(fp, before)
-        if not changes:
+        if changes:
+            rom_ids = {r for r in changes.values() if r is not None}
+            logger.info(f"RomM check: {len(changes)} save/state change(s) on RomM for {len(rom_ids)} game(s); "
+                        "syncing just those.")
+            if None in changes.values() or not hasattr(self.orchestrator, "romm_sync"):
+                self.orchestrator.full_sync(force_sync=False)
+            else:
+                self.orchestrator.romm_sync(rom_ids)
+        else:
             logger.debug("RomM check: nothing new on RomM; sync folders not touched.")
-            self._last_fp = fp
-            with api._own_lock:
-                api.own_changes -= before
-            return
-        logger.info(f"RomM check: {len(changes)} save/state change(s) on RomM; syncing.")
-        self._full()
+        self._last_fp = fp
+        api.take_own(before)
 
 
 class FileChangeHandler(FileSystemEventHandler):

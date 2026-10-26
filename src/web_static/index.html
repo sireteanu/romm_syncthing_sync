@@ -227,6 +227,20 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
 .hist td,.hist th{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 .hist th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
 .hist td.f{font-family:var(--mono);font-size:12px;word-break:break-all}
+.sw{position:relative;display:inline-block;width:34px;height:20px;cursor:pointer}
+.sw input{opacity:0;width:0;height:0;position:absolute}
+.sw i{position:absolute;inset:0;background:var(--surface-hover);border:1px solid var(--line-strong);border-radius:99px;transition:background .15s}
+.sw i::after{content:"";position:absolute;width:14px;height:14px;left:2px;top:2px;border-radius:50%;background:var(--muted);transition:transform .15s var(--ease),background .15s}
+.sw input:checked+i{background:var(--accent);border-color:transparent}
+.sw input:checked+i::after{transform:translateX(14px);background:#fff}
+.sw input:focus-visible+i{outline:2px solid var(--accent);outline-offset:2px}
+tr.off .pf-folder,tr.off .pf-target{opacity:.55}
+.devs{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;padding:14px 16px}
+.dev{border:1px solid var(--line);border-radius:var(--r-md);padding:10px 12px;background:var(--surface-2)}
+.dev .n{font-weight:600;display:flex;gap:8px;align-items:center}
+.dev .m{color:var(--muted);font-size:12px;margin-top:4px}
+.dev .dot{width:8px;height:8px;border-radius:50%;background:var(--faint);display:inline-block}
+.dev .dot.on{background:var(--ok)}
 .sv-tools{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:0 20px 14px}
 .sv-tools .inp{width:auto}
 .sv-sel{position:sticky;top:0;z-index:5;display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 20px;background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
@@ -239,6 +253,8 @@ footer{color:var(--faint);font-size:12px;text-align:center;margin-top:40px}
 .sv-table .side{white-space:nowrap;color:var(--muted)}
 .sv-table .side b{color:var(--text);font-weight:500}
 .sv-table .none{color:var(--faint)}
+.sv-name{font-family:var(--mono);font-size:12px;text-align:left;color:var(--text);word-break:break-all;padding:0;background:none;border:0;cursor:pointer;text-decoration:underline dotted var(--faint);text-underline-offset:3px}
+.sv-name:hover{color:var(--accent)}
 @media (max-width:760px){.sv-table .h-sm{display:none}.sv-tools .inp,.sv-tools .search{width:100%}}
 @media (max-width:860px){ .logbox .e{grid-template-columns:1fr} .hist .h-res{display:none} }
 /* settings view */
@@ -360,6 +376,11 @@ html,body{overflow-x:hidden}
     </div>
   </section>
 
+  <section id="st-section" hidden>
+    <h2>Syncthing devices <span class="count" id="st-count"></span></h2>
+    <div class="card"><div class="devs" id="st-devs"></div></div>
+  </section>
+
   <section id="approvals-section" hidden>
     <h2>Needs your attention <span class="count" id="pending-count">0</span></h2>
     <div class="card approvals">
@@ -413,8 +434,8 @@ html,body{overflow-x:hidden}
       </div>
       <div id="pf-notices" style="padding:0 20px"></div>
       <div style="overflow-x:auto"><table class="pf-table">
-        <thead><tr><th>Folder</th><th class="pf-c-games">Games</th><th>Matches RomM platform</th><th>How</th><th>Change</th></tr></thead>
-        <tbody id="pf-rows"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+        <thead><tr><th title="Switch syncing on or off for this system">Sync</th><th>Folder</th><th class="pf-c-games">Games</th><th>Matches RomM platform</th><th>How</th><th>Change</th></tr></thead>
+        <tbody id="pf-rows"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
       </table></div>
       <div class="legend-row">
         <span><span class="how how-mapping">Mapped</span> saved on this page (pre-filled with common MinUI / NextUI / Knulli folder names)</span>
@@ -452,6 +473,7 @@ html,body{overflow-x:hidden}
         <button class="btn small" id="sv-dl" disabled>Download to folder</button>
         <button class="btn small" id="sv-ul" disabled>Upload to RomM</button>
         <button class="btn small" id="sv-prune" disabled>Remove old RomM versions</button>
+        <button class="btn small" id="sv-zip" disabled title="Download the selected files as a .zip, laid out like your sync folders">Download .zip</button>
         <button class="btn small danger" id="sv-del" disabled>Delete</button>
         <button class="btn small" id="sv-clear" disabled>Clear selection</button>
       </div>
@@ -507,6 +529,7 @@ html,body{overflow-x:hidden}
       </div>
       <div>
         <div class="card set-card" id="set-notify"></div>
+        <div class="card set-card" id="set-syncthing" style="margin-top:16px"></div>
         <div class="card set-card" id="set-access" style="margin-top:16px"></div>
         <div class="card set-card" id="set-conn" style="margin-top:16px"></div>
       </div>
@@ -909,7 +932,7 @@ function slugFromInput(v){
 }
 async function loadPlatforms(force){
   try { pf.data = await api("api/platforms"); renderPlatforms(); }
-  catch(e){ $("#pf-rows").innerHTML = `<tr><td colspan="5" class="empty">Couldn't load platforms: ${esc(e.message)}</td></tr>`; }
+  catch(e){ $("#pf-rows").innerHTML = `<tr><td colspan="6" class="empty">Couldn't load platforms: ${esc(e.message)}</td></tr>`; }
 }
 function renderPlatforms(){
   const d = pf.data; if(!d) return;
@@ -951,8 +974,9 @@ function renderPlatforms(){
                 (f.how==="mapping" ? optLabel(d.platforms.find(p=>p.slug===f.slug) || {name:f.name||f.slug, slug:f.slug}) : "");
     const target = f.slug ? `<div class="nm">${esc(f.name || f.slug)}</div><div class="sl">${esc(f.slug)}${f.in_library?` · ${plural(f.rom_count,"ROM")} in your RomM`:` · <span style="color:var(--warn)">not in your RomM library</span>`}</div>`
                           : `<span style="color:var(--muted)">—</span>`;
-    return `<tr class="${dirty?"dirty":""}" data-folder="${esc(f.folder)}">
-      <td><div class="pf-folder">${esc(f.folder)}</div></td>
+    return `<tr class="${dirty?"dirty":""}${f.enabled?"":" off"}" data-folder="${esc(f.folder)}">
+      <td><label class="sw" title="${f.enabled?"Syncing — click to switch off":"Not syncing — click to switch on"}"><input type="checkbox" data-en ${f.enabled?"checked":""}><i></i></label></td>
+      <td><div class="pf-folder">${esc(f.folder)}</div>${f.enabled?"":`<div style="color:var(--warn);font-size:12px">sync off</div>`}</td>
       <td class="pf-c-games">${f.games}${f.unmatched?` <span style="color:var(--warn)">(${f.unmatched} unmatched)</span>`:""}</td>
       <td class="pf-target">${target}</td>
       <td><span class="how how-${f.how}">${HOW[f.how]}</span></td>
@@ -960,10 +984,16 @@ function renderPlatforms(){
         <input list="pf-options" placeholder="${f.how==="none"?"Pick a RomM platform…":"Override automatic match…"}" value="${esc(val)}" aria-label="RomM platform for ${esc(f.folder)}">
         ${(f.how==="mapping" || (dirty && edit)) ? `<button class="iconbtn" data-clear title="Remove mapping (use automatic matching)" aria-label="Remove mapping">✕</button>` : ""}
       </div></td></tr>`;
-  }).join("") || `<tr><td colspan="5" class="empty">No system folders found in your sync folders yet.</td></tr>`;
+  }).join("") || `<tr><td colspan="6" class="empty">No system folders found in your sync folders yet.</td></tr>`;
 
   $("#pf-rows").querySelectorAll("tr[data-folder]").forEach(tr => {
-    const folder = tr.dataset.folder, f = d.folders.find(x=>x.folder===folder), input = tr.querySelector("input");
+    const folder = tr.dataset.folder, f = d.folders.find(x=>x.folder===folder), input = tr.querySelector("input[list]");
+    tr.querySelector("[data-en]").onchange = async ev => {
+      const on = ev.target.checked;
+      try { pf.data = await api("api/platforms/enabled", {method:"PUT", body:JSON.stringify({folder, enabled:on})}); renderPlatforms();
+            toast(on ? `Syncing ${folder} again` : `${folder} won't be synced`); }
+      catch(e){ ev.target.checked = !on; toast("⚠ "+e.message); }
+    };
     input.onchange = () => {
       const v = input.value.trim();
       if (!v) { setEdit(folder, f.how==="mapping" ? null : undefined); return; }
@@ -1013,9 +1043,10 @@ async function loadSettings(){
 }
 function fieldHTML(f){
   const v = f.key in sv.edits ? sv.edits[f.key] : f.value;
-  const src = sv.reset.has(f.key) ? "" : f.source==="dashboard" ? `<span class="src dash">changed here</span> <button class="linkbtn" data-reset="${f.key}">reset to ${f.container_value!=null && f.type!=="secret" ? esc(String(f.container_value)) : "container value"}</button>` : f.source==="container" ? `<span class="src">from container</span>` : "";
+  const src = sv.reset.has(f.key) ? "" : f.source==="dashboard" ? `<span class="src dash">changed here</span> <button class="linkbtn" data-reset="${f.key}">reset to ${f.type==="bool" ? (f.container_value?"On":"Off") : f.container_value!=null && f.type!=="secret" ? esc(String(f.container_value)) : "container value"}</button>` : f.source==="container" ? `<span class="src">from container</span>` : "";
   let ctl = "";
-  if (f.type === "choice") ctl = `<div class="seg-ctl" style="display:inline-flex">${f.choices.map(c=>`<button data-set="${f.key}" data-v="${c}" class="${String(v)===String(c)?"on":""}">${esc((f.labels&&f.labels[c])||MODE[c]||c)}</button>`).join("")}</div>`;
+  if (f.type === "bool") ctl = `<div class="seg-ctl" style="display:inline-flex">${[["false","Off"],["true","On"]].map(([c,l])=>`<button data-set="${f.key}" data-v="${c}" class="${String(v)===c?"on":""}">${l}</button>`).join("")}</div>`;
+  else if (f.type === "choice") ctl = `<div class="seg-ctl" style="display:inline-flex">${f.choices.map(c=>`<button data-set="${f.key}" data-v="${c}" class="${String(v)===String(c)?"on":""}">${esc((f.labels&&f.labels[c])||MODE[c]||c)}</button>`).join("")}</div>`;
   else if (f.type === "int") ctl = `<div class="row"><input class="inp num" type="number" min="${f.min}" max="${f.max}" data-set="${f.key}" value="${esc(v)}"><span style="color:var(--muted);font-size:12.5px">${f.unit}${f.unit==="seconds"&&v?` (${secsHuman(v)})`:""}</span></div>`;
   else if (f.type === "secret") ctl = `<input class="inp" type="password" autocomplete="new-password" data-set="${f.key}" placeholder="${f.is_set?"•••••••• saved — type to change":"not set"}" value="${esc(sv.edits[f.key]||"")}">`;
   else ctl = `<input class="inp" type="text" autocomplete="off" data-set="${f.key}" value="${esc(v||"")}">`;
@@ -1028,6 +1059,10 @@ function renderSettings(){
   $("#set-timing").innerHTML = `<h3>Timing</h3><p>Current sync mode: <b>${esc(d.connection.sync_mode)}</b>.</p>${by("timing")}`;
   $("#set-backups").innerHTML = `<h3>Files &amp; backups</h3><p>How files are written to your sync folders. Before any file is overwritten, the replaced version is copied to the backups folder.</p>${by("backups")}`;
   $("#set-access").innerHTML = `<h3>Dashboard access</h3><p>Optional login for this dashboard.</p>${by("access")}`;
+  const stF = d.fields.filter(f=>f.group==="syncthing" && f.key!=="SYNCTHING_FOLDERS").map(fieldHTML).join("");
+  $("#set-syncthing").innerHTML = `<h3>Syncthing <span style="color:var(--muted);font-weight:400;font-size:13px">optional</span></h3><p>Lets the app wait until Syncthing has finished receiving a save before syncing it, and shows your devices on the dashboard. Read-only: nothing in Syncthing is changed.</p>${stF}
+    <div class="field"><div class="lbl">Syncthing folders with your saves</div><div id="st-folders" class="hlp">${d.fields.find(f=>f.key==="SYNCTHING_URL").value ? "Loading…" : "Save the address and API key first."}</div></div>`;
+  if (d.fields.find(f=>f.key==="SYNCTHING_URL").value) loadSyncthingFolders();
   const c = d.connection;
   $("#set-conn").innerHTML = `<h3>Connection</h3><p>Set in the container (Unraid template / docker compose). Changing these needs a restart.</p>
     <dl class="kvlist"><dt>RomM</dt><dd>${esc(c.romm_url)}</dd><dt>Auth</dt><dd>${esc(c.auth_type)}</dd><dt>Sync mode</dt><dd>${esc(c.sync_mode)}</dd>
@@ -1040,6 +1075,19 @@ function renderSettings(){
   });
   document.querySelectorAll("#view-set [data-reset]").forEach(b => b.onclick = () => { sv.reset.add(b.dataset.reset); delete sv.edits[b.dataset.reset]; renderSettings(); });
   renderSetSavebar();
+}
+async function loadSyncthingFolders(){
+  const box = $("#st-folders");
+  try {
+    const r = await api("api/syncthing/folders");
+    const cur = "SYNCTHING_FOLDERS" in sv.edits ? sv.edits.SYNCTHING_FOLDERS.split(",").filter(Boolean) : r.picked;
+    box.className = "";
+    box.innerHTML = r.folders.map(f => `<label class="chk"><input type="checkbox" data-stf="${esc(f.id)}" ${cur.includes(f.id)?"checked":""}><span><b>${esc(f.label)}</b><br><span style="color:var(--muted);font-size:12px;font-family:var(--mono)">${esc(f.id)} · ${esc(f.path)}</span></span></label>`).join("") || `<div class="hlp">Syncthing has no folders.</div>`;
+    box.querySelectorAll("[data-stf]").forEach(c => c.onchange = () => {
+      sv.edits.SYNCTHING_FOLDERS = [...box.querySelectorAll("[data-stf]:checked")].map(x=>x.dataset.stf).join(",");
+      renderSetSavebar();
+    });
+  } catch(e) { box.className = "hlp"; box.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`; }
 }
 function renderSetSavebar(){
   const n = Object.keys(sv.edits).length + sv.reset.size;
@@ -1166,10 +1214,11 @@ function renderSaves(){
     const all = g.rows.every(r=>sv2.sel.has(r.id)), some = g.rows.some(r=>sv2.sel.has(r.id));
     return `<tr class="g"><td><input type="checkbox" data-sg="${esc(g.key)}" ${all?"checked":""} ${!all&&some?"data-ind=1":""}></td><td colspan="4"><span class="gn">${esc(g.game)}</span> <span style="color:var(--muted)">· ${esc(g.system)} · ${plural(g.rows.length,"file")}</span></td></tr>`
       + g.rows.map(r => { const [c,l] = SV_STATUS[r.status]; return `<tr class="f"><td><input type="checkbox" data-sr="${r.id}" ${sv2.sel.has(r.id)?"checked":""}></td>
-        <td class="f">${esc(r.name)}<div style="color:var(--muted);font-family:var(--font)">${r.type}${r.matched?"":" · not matched to a RomM game"}</div></td>
+        <td class="f"><button class="linkbtn sv-name" data-hist="${r.id}" title="Version history">${esc(r.name)}</button><div style="color:var(--muted);font-family:var(--font)">${r.type}${r.matched?"":" · not matched to a RomM game"}</div></td>
         <td class="side h-sm">${side(r.local,false)}</td><td class="side h-sm">${side(r.romm,true)}</td><td><span class="chip ${c}">${l}</span></td></tr>`; }).join("");
   }).join("") || `<tr><td colspan="5" class="empty">${sv2.rows.length ? "Nothing matches these filters." : "No saves or states found."}</td></tr>`;
   document.querySelectorAll("[data-ind]").forEach(c => c.indeterminate = true);
+  document.querySelectorAll("[data-hist]").forEach(b => b.onclick = () => svHistory(sv2.rows.find(r=>r.id===b.dataset.hist)));
   $("#sv-more").hidden = groups.length <= sv2.limit;
   const byKey = Object.fromEntries(groups.map(g=>[g.key,g]));
   document.querySelectorAll("[data-sg]").forEach(c => c.onchange = () => { byKey[c.dataset.sg].rows.forEach(r => c.checked ? sv2.sel.add(r.id) : sv2.sel.delete(r.id)); renderSaves(); });
@@ -1189,6 +1238,7 @@ function svUpdateBar(rows, groups){
   const set = (id, n, label) => { const b=$(id); b.disabled = busy || !n; b.textContent = n ? `${label} (${n})` : label; };
   set("#sv-dl", dl.length, "Download to folder"); set("#sv-ul", ul.length, "Upload to RomM");
   set("#sv-prune", pr.length, "Remove old RomM versions"); set("#sv-del", s.length, "Delete");
+  set("#sv-zip", s.length, "Download .zip");
   $("#sv-clear").disabled = !s.length;
 }
 async function svRun(action, list, confirmOpts){
@@ -1214,6 +1264,40 @@ function watchSavesJob(){
   };
   tick();
 }
+const SRC_LABEL = {local:"Folder", romm:"RomM", backup:"Backup", bin:"Recycle bin"};
+async function svHistory(r){
+  if (!r) return;
+  openModal(`<div class="mh"><div><h3>Version history</h3><div style="color:var(--muted);font-family:var(--mono);font-size:12.5px">${esc(r.game)} · ${esc(r.name)}</div></div></div><div class="mb" id="vh-body"><div class="empty">Loading…</div></div><div class="mf"><button class="btn" onclick="closeModal()">Close</button></div>`, true);
+  try {
+    const d = await api(`api/saves/${r.id}/versions`);
+    const dl = v => `api/saves/${r.id}/versions/download?source=${v.source}&ref=${encodeURIComponent(v.ref)}`;
+    $("#vh-body").innerHTML = `<p style="margin:0 0 10px;color:var(--muted)">Every copy the app knows about, newest first. <b>Put back</b> copies that version into your sync folder (the current copy is backed up first); the next sync uploads it to RomM.</p>
+      <div style="overflow:auto"><table class="hist"><thead><tr><th>When</th><th>Where</th><th>Size</th><th></th></tr></thead><tbody>${d.versions.map((v,i) => `<tr>
+        <td style="white-space:nowrap">${v.when ? when(v.when) : "—"}<div style="color:var(--muted)">${v.when ? ago(v.when) : ""}</div></td>
+        <td><span class="chip ${v.source==="local"?"info":v.source==="romm"?"accent":v.source==="bin"?"warn":""}">${SRC_LABEL[v.source]}</span> ${esc(v.label)}${v.current?` <span class="chip ok">current</span>`:""}${v.paired?` <span class="chip" title="The RomM copy your folder is paired with">synced</span>`:""}</td>
+        <td style="white-space:nowrap">${size(v.size)}</td>
+        <td style="white-space:nowrap"><a class="btn small" href="${dl(v)}" download>Download</a>${v.source!=="local"?` <button class="btn small primary" data-put="${i}">Put back</button>`:""}</td></tr>`).join("") || `<tr><td colspan="4" class="empty">No versions found.</td></tr>`}</tbody></table></div>`;
+    document.querySelectorAll("[data-put]").forEach(b => b.onclick = async () => {
+      const v = d.versions[+b.dataset.put];
+      b.disabled = true; b.textContent = "Putting back…";
+      try { const res = await api(`api/saves/${r.id}/versions/restore`, {method:"POST", body:JSON.stringify({source:v.source, ref:v.ref})}); closeModal(); toast(res.message); loadSaves(); }
+      catch(e){ b.disabled = false; b.textContent = "Put back"; toast("⚠ "+e.message); }
+    });
+  } catch(e) { $("#vh-body").innerHTML = `<div class="notice bad" style="margin:0">${esc(e.message)}</div>`; }
+}
+$("#sv-zip").onclick = async () => {
+  const s = svSelected(); const b = $("#sv-zip"); b.disabled = true; const old = b.textContent; b.textContent = "Preparing .zip…";
+  try {
+    const r = await fetch("api/saves/zip", {method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({ids:s.map(x=>x.id)})});
+    if (!r.ok) { let m = "HTTP "+r.status; try { m = (await r.json()).detail || m; } catch(e){} throw new Error(m); }
+    const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement("a");
+    a.href = url; a.download = (r.headers.get("content-disposition")||"").match(/filename="([^"]+)"/)?.[1] || "saves.zip"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+    const probs = +(r.headers.get("x-problems")||0);
+    toast(probs ? `Zip ready, but ${plural(probs,"file")} couldn't be added (see PROBLEMS.txt)` : `Zip ready: ${plural(+(r.headers.get("x-files")||s.length),"file")}`);
+  } catch(e){ toast("⚠ "+e.message); }
+  b.textContent = old; svUpdateBar();
+};
 $("#sv-reload").onclick = () => loadSaves();
 let svQT=null; $("#sv-q").oninput = e => { clearTimeout(svQT); svQT = setTimeout(()=>{ sv2.q=e.target.value; sv2.limit=150; renderSaves(); }, 200); };
 $("#sv-sys").onchange = e => { sv2.sys=e.target.value; sv2.limit=150; renderSaves(); };
@@ -1239,7 +1323,7 @@ $("#sv-ul").onclick = () => { const s = svSelected().filter(r=>r.can_upload); sv
 
 // ---------- logs view ----------
 const lg = { level:"INFO", q:"", timer:null, lastHash:"" };
-const KIND_LABEL = {push_new:"Upload (new)", push_update:"Upload", pull_new:"Download (new)", pull_update:"Download", conflict:"Conflict", delete_romm:"Delete on RomM", delete_local:"Delete in folder", manage_delete:"Delete (Saves page)", manage_prune:"Old versions removed"};
+const KIND_LABEL = {push_new:"Upload (new)", push_update:"Upload", pull_new:"Download (new)", pull_update:"Download", conflict:"Conflict", delete_romm:"Delete on RomM", delete_local:"Delete in folder", manage_delete:"Delete (Saves page)", manage_prune:"Old versions removed", manage_restore:"Older version put back"};
 async function loadLogs(){
   clearTimeout(lg.timer);
   if (location.hash !== "#logs") return;
@@ -1296,6 +1380,29 @@ async function poll(){
   const busy = state.data && ["building","fetching","syncing","applying","starting"].includes(state.data.phase);
   timer = setTimeout(poll, busy ? 1000 : Math.min(2500 * (1 + fails), 15000));
 }
+
+let stTimer = null;
+async function pollSyncthing(){
+  clearTimeout(stTimer);
+  try {
+    const d = await api("api/syncthing");
+    $("#st-section").hidden = !d.configured;
+    if (d.configured) {
+      if (d.error) $("#st-devs").innerHTML = `<div class="notice bad" style="margin:0;grid-column:1/-1">Couldn't reach Syncthing: ${esc(d.error)} <a href="#settings">Settings</a></div>`;
+      else {
+        const busy = (d.folders||[]).filter(f=>f.state && f.state!=="idle");
+        $("#st-count").textContent = (d.devices||[]).length;
+        $("#st-devs").innerHTML = (busy.length ? `<div class="notice" style="margin:0;grid-column:1/-1">${busy.map(f=>`${esc(f.label)}: ${esc(f.state)}${f.need_files?` (${f.need_files} files to go)`:""}`).join(" · ")}</div>` : "")
+          + ((d.devices||[]).map(v => `<div class="dev"><div class="n"><span class="dot ${v.connected?"on":""}"></span>${esc(v.name)}</div>
+            <div class="m">${v.connected?"Connected":"Not connected"}${v.completion!=null?` · ${v.completion>=100?"up to date":v.completion+"% synced"}`:""}</div></div>`).join("")
+            || `<div class="hlp" style="grid-column:1/-1">No other devices share ${d.picked?"these folders":"your folders"}.</div>`)
+          + (d.picked ? "" : `<div class="hlp" style="grid-column:1/-1;color:var(--warn)">Pick the folders that hold your saves in <a href="#settings">Settings → Syncthing</a> so the app knows what to wait for.</div>`);
+      }
+    }
+  } catch(e) {}
+  stTimer = setTimeout(pollSyncthing, 30000);
+}
+pollSyncthing();
 
 $("#sync-btn").onclick = async () => { try { await api("api/sync",{method:"POST"}); toast("Sync started"); poll(); } catch(e){ toast("⚠ "+e.message); } };
 $("#q").oninput = e => { state.q = e.target.value; state.lastHash.games = null; render(); };

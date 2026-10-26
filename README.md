@@ -191,9 +191,10 @@ Use **`SAVE_SYNC_FOLDER`** and **`STATE_SYNC_FOLDER`**.
 - `watch` (default, recommended): full sync on start, then incremental syncs on file changes. RomM is also checked every `ROMM_POLL_INTERVAL_SECONDS`, because changes made on RomM don't create local file events.
 - `periodic`: full sync every `SYNC_INTERVAL_SECONDS`.
 
-**Lets your disks sleep (watch mode).** The app only ever reads the folders you map into it: your saves and states folders, and `/data`. It never reads your ROMs, because the game list comes from RomM's API. The RomM check is quiet: it asks RomM for its list of saves and states (no disk access) and reads your sync folders only when RomM actually has something new. A save you changed is synced on its own, without re-reading the rest of the folder. The folders are read in full only at startup, on **Sync now**, when RomM has changes, and once every `FULL_SCAN_INTERVAL_HOURS` as a safety net (`0` = never). The dashboard shows when that last happened (*Last folder scan*).
+**Lets your disks sleep (watch mode).** The app only ever reads the folders you map into it: your saves and states folders, and `/data`. It never reads your ROMs, because the game list comes from RomM's API. The RomM check is quiet: it asks RomM for its list of saves and states (no disk access). When something changed on RomM, only the games it changed for are synced, reading just their files. A save you changed is synced on its own, without re-reading the rest of the folder. The folders are read in full only at startup, on **Sync now**, and once every `FULL_SCAN_INTERVAL_HOURS` as a safety net (`0` = never). The dashboard shows when that last happened (*Last folder scan*).
 
 On Unraid, the best setup is to keep the saves/states share and `appdata` on a cache pool (*Primary storage: Cache*, *Secondary storage: None*). Then nothing this app or Syncthing does can spin up array disks.
+
 A full sync now fetches all saves and states in two API calls instead of two per game, so it's quick even for large libraries.
 
 | Variable | Default | |
@@ -204,6 +205,7 @@ A full sync now fetches all saves and states in two API calls instead of two per
 | `SYNC_INTERVAL_SECONDS` | 1800 | periodic: seconds between full syncs (each one reads the sync folders) |
 | `FULL_INITIAL_SYNC` | true | `true`, `false`, or `force` (force-push once on startup) |
 | `FORCE_PUSH_SYNC` | false | local always wins, even over conflicts. Dangerous |
+| `DRY_RUN` | false | test mode: nothing is uploaded, downloaded or deleted; syncs only log what they would do. Also a switch on the Settings page |
 
 ### Two-way sync & approvals
 
@@ -214,6 +216,7 @@ A full sync now fetches all saves and states in two API calls instead of two per
 | `BACKUP_RETENTION_DAYS` | 30 | keep backups of overwritten files this long (`0` = forever) |
 | `DELETE_MODE` | auto | a synced file deleted on one side: `auto` (remove the other copy too, into the recycle bin), `ask`, or `off` (never delete; asks to re-download/re-upload) |
 | `RECYCLE_RETENTION_DAYS` | 30 | clear recycle bin items after this many days (`0` = never) |
+| `ROMM_KEEP_VERSIONS` | 0 | RomM keeps a copy per upload; keep only this many per file and move older ones to the recycle bin after each sync (`0` = keep all). The copy your folder is synced with is always kept |
 | `DATA_FOLDER` → `/data` | `./data` | sync history, pending approvals, backups. **Keep this persistent**, it's how changes on each side are told apart |
 | `PUID` / `PGID` | — | owner of files written into the sync folders (Unraid: `99` / `100`) |
 | `FILE_MODE` | 0777 | permissions for files and folders written into the sync folders and backups (also on the Settings page) |
@@ -229,7 +232,13 @@ Filter by system, saves or states, or by where a file is (*In both*, *Folder onl
 - **Remove old RomM versions**: RomM 5.x keeps a copy every time a file is uploaded. This keeps the newest and moves the older ones to the recycle bin. Your folder isn't changed.
 - **Download to folder** (files only on RomM) and **Upload to RomM** (files only in your folder that are matched to a RomM game).
 
+- **Download .zip**: the selected files laid out like your sync folders (`saves/<system>/…`, `states/<system>/…`), from your folder or RomM's newest copy. A quick off-server backup.
+
 Bulk actions run in the background with a progress bar; anything that fails is listed with the reason. The page reads your sync folders only when you open or reload it.
+
+**Version history.** Click a file name to see every copy the app knows about: the one in your folder, each version RomM keeps, the backups made before overwrites, and recycle bin entries. **Download** any of them, or **Put back** one into your sync folder (the current copy is backed up first). The next sync uploads it to RomM. Handy when a save got corrupted or you want to go back to before a bad decision.
+
+![Version history of a save: copies in the folder, on RomM, in backups and in the recycle bin](docs/screenshots/history.png)
 
 ### Recycle bin
 
@@ -261,6 +270,8 @@ The dashboard has no other login. Don't expose it to the internet without a pass
 Each system folder in your sync folders (`snes`, `md`, `Nintendo 64`, …) has to point at a RomM platform so its saves can be matched to games. Open the **Platforms** tab in the dashboard to see how every folder resolves and fix the ones that don't:
 
 ![Platforms page: each sync folder with the RomM platform it matches, how it was matched, and a searchable picker](docs/screenshots/platforms.png)
+
+Use the **Sync** switch on a row to stop syncing a system (for example arcade) without removing its folder. Its files are left alone in both directions until you switch it back on.
 
 Folders are resolved in this order, and most never need a mapping:
 
@@ -296,6 +307,18 @@ Pick what to be told about:
 - **Sync activity:** off by default.
 
 If you set the **Dashboard address**, messages link straight to it. Use **Send test** to check a service.
+
+### Syncthing integration (optional)
+
+Under Settings → Syncthing, enter your Syncthing address (e.g. `http://192.168.1.6:8384`) and API key (Syncthing → Actions → Settings → General), save, then tick the Syncthing folders that hold your saves and states. Then:
+- the app waits until Syncthing has finished receiving files in those folders before it syncs a change (at most 10 minutes), so a half-received save is never uploaded. You can lower *Wait after a file changes* to a few seconds;
+- the dashboard shows the devices sharing those folders, whether they're connected and how up to date they are.
+
+Only Syncthing's read-only REST API is used; nothing in Syncthing is changed. Also settable with `SYNCTHING_URL`, `SYNCTHING_API_KEY` and `SYNCTHING_FOLDERS` (comma-separated folder IDs).
+
+### Health check
+
+The image has a Docker health check (`/api/health`). The container is shown as **unhealthy** in Unraid/Docker when syncs have been failing for 15 minutes, for example because RomM is unreachable or the token was revoked. It turns healthy again after the next successful sync.
 
 # Releases
 

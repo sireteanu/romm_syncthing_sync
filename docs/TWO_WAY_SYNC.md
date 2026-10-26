@@ -61,7 +61,7 @@ When a transfer fails, `explain_error()` turns the exception into a sentence you
 
 ## When syncs run
 
-- **watch mode:** local file events (debounced by `WATCHDOG_DELAY_SECONDS`) run an incremental sync for the affected games. Every `ROMM_POLL_INTERVAL_SECONDS` a poller fetches RomM's save/state list (`id` + `updated_at`) and compares it with the previous check, ignoring files this app uploaded, replaced or deleted itself. Only if something else changed does it run a full sync, so the sync folders (and the disks under them) are left alone otherwise. A full sync also runs every `FULL_SCAN_INTERVAL_HOURS` (default 24, `0` = never) as a safety net.
+- **watch mode:** local file events (debounced by `WATCHDOG_DELAY_SECONDS`) run an incremental sync for the affected games. Every `ROMM_POLL_INTERVAL_SECONDS` a poller fetches RomM's save/state list (`id` + `updated_at`) and compares it with the previous check, ignoring files this app uploaded, replaced or deleted itself. Only if something else changed does it sync, and then only the games those RomM files belong to (plus RomM-only files for those ROMs), so the rest of the sync folders (and the disks under them) are left alone. A file this app wrote counts as its own only while RomM still has the exact version it wrote; if another device changes it afterwards, that change is picked up. A full sync also runs every `FULL_SCAN_INTERVAL_HOURS` (default 24, `0` = never) as a safety net.
 - **periodic mode:** a full sync every `SYNC_INTERVAL_SECONDS`.
 - **Sync now** in the dashboard, and after each approval, a full sync runs right away.
 

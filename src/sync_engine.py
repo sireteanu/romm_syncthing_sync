@@ -326,8 +326,11 @@ class SyncEngine:
     # endregion
 
     def reconcile(self, games: List[Game], srv=None, discover_remote: bool = False, force: bool = False,
-                  all_games: Optional[List[Game]] = None) -> dict:
-        """Compare local vs RomM for the given games; run automatic actions, queue the rest."""
+                  all_games: Optional[List[Game]] = None, scope: Optional[set] = None) -> dict:
+        """Compare local vs RomM for the given games; run automatic actions, queue the rest.
+        scope: RomM ROM ids. Limits the search for RomM-only files to those ROMs (a sync triggered by changes on
+        RomM); the whole-library clean-ups only run on a full sync (discover_remote and no scope)."""
+        full = discover_remote and scope is None
         summary = {"pushed": 0, "pulled": 0, "deleted": 0, "queued": 0, "conflicts": 0, "in_sync": 0, "errors": 0,
                    "unmatched": 0}
         pull_mode = self.pull_mode
@@ -355,7 +358,7 @@ class SyncEngine:
         for g in (all_games if all_games is not None else games):
             self._local_names.setdefault(g.platform.lower(), set()).add(g.name)
 
-        if discover_remote:  # full sync: duplicate warnings are re-detected from scratch
+        if full:  # full sync: duplicate warnings are re-detected from scratch
             with STATE.lock:
                 for k in [k for k in STATE.errors if k.startswith("dup:")]:
                     del STATE.errors[k]
@@ -375,10 +378,10 @@ class SyncEngine:
                 STATE.update_game(self.snapshot(game, {}, {}, error=str(e)))
 
         if discover_remote and srv is not None:
-            self._discover_remote_only(remote, seen_rom_ids, srv, pull_mode, summary)
+            self._discover_remote_only(remote, seen_rom_ids, srv, pull_mode, summary, scope)
         self._run_auto_deletes(summary)
 
-        if discover_remote:
+        if full:
             # Full sync: anything still queued that this sync didn't come across any more (file renamed,
             # game re-matched, queued by an older version...) is stale.
             with STATE.lock:
@@ -389,7 +392,7 @@ class SyncEngine:
                 logger.info(f"Removed {len(stale)} queued item(s) that no longer apply.")
 
         STATE.save()
-        save_hash_cache(prune=discover_remote)
+        save_hash_cache(prune=full)
         return summary
 
     def _reconcile_game(self, game: Game, remote, pull_mode, force, summary):
@@ -493,15 +496,18 @@ class SyncEngine:
             reason=d.reason,
         )
 
-    def _discover_remote_only(self, remote, seen_rom_ids, srv, pull_mode, summary):
+    def _discover_remote_only(self, remote, seen_rom_ids, srv, pull_mode, summary, scope: Optional[set] = None):
         """Saves/states on RomM for games that have nothing in the sync folder yet."""
         rows = {r["id"]: r for r in srv.library}
         folders_by_type = {}
         for ft in ("save", "state"):
             root = self.cfg.sync_dir_for(ft)
             folders_by_type[ft] = [p for p in root.iterdir() if p.is_dir()] if root is not None and root.exists() else []
+        from .settings import sync_enabled
+        for ft in folders_by_type:
+            folders_by_type[ft] = [f for f in folders_by_type[ft] if sync_enabled(f.name)]
         for rom_id in sorted(set(remote["save"]) | set(remote["state"])):
-            if rom_id in seen_rom_ids or rom_id not in rows:
+            if rom_id in seen_rom_ids or rom_id not in rows or (scope is not None and rom_id not in scope):
                 continue
             row = rows[rom_id]
             files = self._remote_for_rom(remote, rom_id, row)

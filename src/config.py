@@ -94,6 +94,12 @@ class Config:
         self.ROMM_POLL_INTERVAL_SECONDS: int = romm_poll_interval_seconds
         # Watch mode: re-read the whole sync folders this often even if nothing seems to have changed (0 = never)
         self.FULL_SCAN_INTERVAL_HOURS: int = full_scan_interval_hours
+        # RomM keeps a copy per upload; older ones beyond this are moved to the recycle bin (0 = keep all)
+        self.ROMM_KEEP_VERSIONS: int = int(os.getenv("ROMM_KEEP_VERSIONS", "0"))
+        # Optional Syncthing integration: wait for Syncthing to finish before syncing, show device status
+        self.SYNCTHING_URL: str = os.getenv("SYNCTHING_URL", "")
+        self.SYNCTHING_API_KEY: str = os.getenv("SYNCTHING_API_KEY", "")
+        self.SYNCTHING_FOLDERS: str = os.getenv("SYNCTHING_FOLDERS", "")
         self.BACKUP_RETENTION_DAYS: int = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
 
         # Web GUI

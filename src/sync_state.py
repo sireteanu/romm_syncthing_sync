@@ -52,6 +52,7 @@ ACTION_KINDS = {
     "delete_local": "Deleted on RomM → remove from your sync folder (to recycle bin)",
     "manage_delete": "Deleted from the Saves page (folder and RomM, to recycle bin)",
     "manage_prune": "Older RomM versions removed (to recycle bin)",
+    "manage_restore": "Older version put back into your sync folder",
 }
 
 
@@ -139,7 +140,8 @@ class AppState:
 
         # Hook set by the app: called by the GUI "Sync now" button.
         self.request_sync_callback = None
-        self.orchestrator = None  # the running SyncOrchestrator (its libraries feed the Saves page)
+        self.orchestrator = None
+        self.problem_since: Optional[str] = None  # first failed sync in the current run of failures (health check)  # the running SyncOrchestrator (its libraries feed the Saves page)
 
     # region persistence
     def _load(self):
@@ -229,6 +231,9 @@ class AppState:
             self.last_sync_result = result
             if error:
                 self.last_error = error
+                self.problem_since = self.problem_since or utcnow_iso()
+            else:
+                self.problem_since = None
             self.phase = "error" if error else "idle"
             self.phase_detail = error or ""
             self.current_game = None

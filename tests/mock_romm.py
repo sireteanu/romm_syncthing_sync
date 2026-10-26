@@ -130,6 +130,63 @@ def debug_touch(rom_id: int, name: str = ""):
     raise HTTPException(404)
 
 
+# --- minimal Syncthing REST API (for the Syncthing integration) ---------------------------------------
+ST = {"busy": False}
+_ST_ME = "AAAAAAA-SERVER"
+_ST_DEVS = [{"deviceID": _ST_ME, "name": "unraid"}, {"deviceID": "BBBBBBB-DECK", "name": "Steam Deck"},
+            {"deviceID": "CCCCCCC-RP5", "name": "Retroid Pocket 5"}]
+
+
+def _st_auth(request):
+    if request.headers.get("X-API-Key") != "stkey":
+        raise HTTPException(403)
+
+
+@app.get("/rest/system/status")
+def st_status(request: Request):
+    _st_auth(request)
+    return {"myID": _ST_ME}
+
+
+@app.get("/rest/system/connections")
+def st_conns(request: Request):
+    _st_auth(request)
+    return {"connections": {"BBBBBBB-DECK": {"connected": True}, "CCCCCCC-RP5": {"connected": False}}}
+
+
+@app.get("/rest/config/devices")
+def st_devices(request: Request):
+    _st_auth(request)
+    return _ST_DEVS
+
+
+@app.get("/rest/config/folders")
+def st_folders(request: Request):
+    _st_auth(request)
+    devs = [{"deviceID": d["deviceID"]} for d in _ST_DEVS]
+    return [{"id": "saves-xyz", "label": "Saves", "path": "/mnt/user/syncthing/saves", "devices": devs},
+            {"id": "states-abc", "label": "States", "path": "/mnt/user/syncthing/states", "devices": devs},
+            {"id": "photos", "label": "Photos", "path": "/mnt/user/photos", "devices": devs[:2]}]
+
+
+@app.get("/rest/db/status")
+def st_db_status(request: Request, folder: str):
+    _st_auth(request)
+    return {"state": "syncing" if ST["busy"] else "idle", "needFiles": 3 if ST["busy"] else 0}
+
+
+@app.get("/rest/db/completion")
+def st_completion(request: Request, folder: str, device: str):
+    _st_auth(request)
+    return {"completion": 100 if device.startswith("BBB") else 62.5}
+
+
+@app.post("/debug/syncthing/busy")
+def st_busy(on: bool = True):
+    ST["busy"] = on
+    return ST
+
+
 @app.get("/debug/stats")
 def debug_stats():
     return {"rom_requests": S.rom_requests}
